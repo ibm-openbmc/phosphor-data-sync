@@ -37,6 +37,7 @@ foreach test_file : test_source_files
                 rbmc_data_sync_dependencies,
             ],
             include_directories: inc_dir,
+            cpp_args : ['-DTEST_ENV_VAR_LOCAL_COPY=1'],  # Define the TEST_ENV_VAR_LOCAL_COPY macro
         )
     )
 endforeach

@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
+#include <cstdlib>
 #include <exception>
 #include <fstream>
 #include <iterator>
@@ -121,6 +122,30 @@ sdbusplus::async::task<> Manager::startSyncEvents()
 }
 
 // NOLINTNEXTLINE
+void Manager::syncData(const config::DataSyncConfig& dataSyncCfg)
+{
+    //  It's a temp basic implementation to verify sync code.
+    std::string command = "rsync -az " + dataSyncCfg._path + " ";
+#ifdef TEST_ENV_VAR_LOCAL_COPY
+    if (dataSyncCfg._destPath.has_value())
+    {
+        command = command + dataSyncCfg._destPath.value();
+    }
+    else
+    {
+        command = command + dataSyncCfg._path;
+    }
+#else
+    command = command + dataSyncCfg._path;
+#endif
+    int result = std::system(command.c_str()); // NOLINT
+    if (result != 0)
+    {
+        lg2::error("Error syncing: {PATH}", "PATH", dataSyncCfg._path);
+    }
+}
+
+// NOLINTNEXTLINE
 sdbusplus::async::task<> Manager::monitorDataToSync(
     [[maybe_unused]] const config::DataSyncConfig& dataSyncCfg)
 {
@@ -132,7 +157,12 @@ sdbusplus::async::task<> Manager::monitorDataToSync(
 sdbusplus::async::task<> Manager::monitorTimerToSync(
     [[maybe_unused]] const config::DataSyncConfig& dataSyncCfg)
 {
-    // TODO Create timer events to monitor data for sync
+    while (!_ctx.stop_requested())
+    {
+        co_await sdbusplus::async::sleep_for(
+            _ctx, std::chrono::seconds(dataSyncCfg._periodicityInSec.value()));
+        syncData(dataSyncCfg);
+    }
     co_return;
 }
 
