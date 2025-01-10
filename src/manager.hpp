@@ -79,6 +79,15 @@ class Manager
     sdbusplus::async::task<> startSyncEvents();
 
     /**
+     * @brief A helper rsync wrapper API which will sync the data to sibling
+     *        BMC.
+     *
+     * @param[in] dataSyncCfg - The data sync config to sync
+     *
+     */
+    static void syncData(const config::DataSyncConfig& dataSyncCfg);
+
+    /**
      * @brief A helper to API to monitor data to sync if its changed
      *
      * @param[in] dataSyncCfg - The data sync config to sync
