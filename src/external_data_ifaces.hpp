@@ -12,6 +12,9 @@ using RBMC = sdbusplus::common::xyz::openbmc_project::state::bmc::Redundancy;
 using BMCRole = RBMC::Role;
 using BMCRedundancy = bool;
 using SiblingBmcIP = std::string;
+using RbmcUserName = std::string;
+using RbmcPassword = std::string;
+using RbmcCredentials = std::pair<RbmcUserName, RbmcPassword>;
 
 /**
  * @class ExternalDataIFaces
@@ -61,6 +64,13 @@ class ExternalDataIFaces
      */
     SiblingBmcIP siblingBmcIP() const;
 
+    /**
+     * @brief Used to obtain the BMC username and password
+     *
+     * @return BMC Username and Password
+     */
+    std::pair<std::string, std::string> rbmcCredentials() const;
+
   protected:
     /**
      * @brief Used to retrieve the BMC role.
@@ -71,6 +81,11 @@ class ExternalDataIFaces
      * @brief Used to retrieve the Sibling BMC IP.
      */
     virtual sdbusplus::async::task<> fetchSiblingBmcIP() = 0;
+
+    /**
+     * @brief Used to retrieve the BMC Username and Password.
+     */
+    virtual sdbusplus::async::task<> fetchRbmcCredentials() = 0;
 
     /**
      * @brief A utility API to assign the retrieved BMC role.
@@ -99,6 +114,16 @@ class ExternalDataIFaces
      */
     void siblingBmcIP(const SiblingBmcIP& siblingBmcIP);
 
+    /**
+     * @brief A utility API to assign the retrieved BMC Username and Password.
+     *
+     * @param[in] rbmcCredentials - The retrieved Sibling BMC Username and
+     *                                Password.
+     *
+     * @return None.
+     */
+    void rbmcCredentials(const RbmcCredentials& rbmcCredentials);
+
   private:
     /**
      * @brief Holds the BMC role.
@@ -114,6 +139,11 @@ class ExternalDataIFaces
      * @brief hold the Sibling BMC IP
      */
     SiblingBmcIP _siblingBmcIP;
+
+    /**
+     * @brief This is Pair, hold the BMCs Username and Password
+     */
+    RbmcCredentials _rbmcCredentials;
 };
 
 } // namespace data_sync::ext_data
