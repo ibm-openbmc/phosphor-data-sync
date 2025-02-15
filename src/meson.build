@@ -10,6 +10,7 @@ rbmc_data_sync_sources = [
         'data_sync_config.cpp',
         'external_data_ifaces.cpp',
         'external_data_ifaces_impl.cpp',
+        'sync_bmc_data_ifaces.cpp',
         'manager.cpp'
         )
   ]
@@ -35,7 +36,7 @@ executable('phosphor-rbmc-data-sync-mgr',
 
 systemd_system_unit_dir = dependency('systemd').get_variable(
   pkgconfig: 'systemdsystemunitdir')
-rbmc_data_sync_service_unit = '../service_files/xyz.openbmc_project.DataSync.BMCData.service'
+rbmc_data_sync_service_unit = '../service_files/xyz.openbmc_project.Control.SyncBMCData.service'
 configure_file(
   copy: true,
   input: rbmc_data_sync_service_unit,
