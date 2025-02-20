@@ -106,7 +106,9 @@ std::optional<std::vector<EventInfo>> DataWatcher::readEvents()
         // NOLINTNEXTLINE to avoid cppcoreguidelines-pro-type-reinterpret-cast
         auto* receivedEvent = reinterpret_cast<inotify_event*>(&buffer[offset]);
 
-        receivedEvents.emplace_back(receivedEvent->name, receivedEvent->mask);
+        receivedEvents.emplace_back(
+            std::string(receivedEvent->name, receivedEvent->len),
+            receivedEvent->mask);
 
         lg2::debug("Received inotify event with mask : {MASK} for {PATH}",
                    "MASK", receivedEvent->mask, "PATH", _dataPathToWatch);
