@@ -2,6 +2,8 @@
 
 #include "manager.hpp"
 
+#include "data_watcher.hpp"
+
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
@@ -57,7 +59,7 @@ sdbusplus::async::task<> Manager::parseConfiguration()
                     configJSON["Files"],
                     std::back_inserter(this->_dataSyncConfiguration),
                     [](const auto& element) {
-                    return config::DataSyncConfig(element);
+                    return config::DataSyncConfig(element, false);
                 });
             }
             if (configJSON.contains("Directories"))
@@ -66,7 +68,7 @@ sdbusplus::async::task<> Manager::parseConfiguration()
                     configJSON["Directories"],
                     std::back_inserter(this->_dataSyncConfiguration),
                     [](const auto& element) {
-                    return config::DataSyncConfig(element);
+                    return config::DataSyncConfig(element, true);
                 });
             }
         }
@@ -165,11 +167,42 @@ sdbusplus::async::task<bool>
     co_return true;
 }
 
-// NOLINTNEXTLINE
-sdbusplus::async::task<> Manager::monitorDataToSync(
-    [[maybe_unused]] const config::DataSyncConfig& dataSyncCfg)
+sdbusplus::async::task<>
+    // NOLINTNEXTLINE
+    Manager::monitorDataToSync(const config::DataSyncConfig& dataSyncCfg)
 {
-    // TODO Create inotify events to monitor data for sync
+    try
+    {
+        uint32_t eventMasksToWatch = IN_CLOSE_WRITE | IN_DELETE_SELF;
+        if (dataSyncCfg._isPathDir)
+        {
+            eventMasksToWatch |= IN_CREATE | IN_DELETE;
+        }
+
+        // Create watcher for the dataSyncCfg._path
+        watch::inotify::DataWatcher dataWatcher(
+            _ctx, IN_NONBLOCK, eventMasksToWatch, dataSyncCfg._path);
+
+        while (!_ctx.stop_requested())
+        {
+            if (auto dataOperations = co_await dataWatcher.onDataChange();
+                !dataOperations.empty())
+            {
+                for ([[maybe_unused]] const auto& dataOp : dataOperations)
+                {
+                    co_await syncData(dataSyncCfg);
+                }
+            }
+        }
+    }
+    catch (std::exception& e)
+    {
+        // TODO : Create error log if fails to create watcher for a
+        // file/directory.
+        lg2::error("Failed to create watcher object for {PATH}. Exception : "
+                   "{ERROR}",
+                   "PATH", dataSyncCfg._path, "ERROR", e.what());
+    }
     co_return;
 }
 
