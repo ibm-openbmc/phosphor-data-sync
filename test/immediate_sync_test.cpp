@@ -346,3 +346,85 @@ TEST_F(ManagerTest, testDataChangeWhenSyncIsDisabled)
         << "The data should match with the data as the src was modified"
         << " and sync should take place at every modification.";
 }
+
+TEST_F(ManagerTest, testDataCreateInDir)
+{
+    using namespace std::literals;
+    namespace extData = data_sync::ext_data;
+
+    std::unique_ptr<extData::ExternalDataIFaces> extDataIface =
+        std::make_unique<extData::MockExternalDataIFaces>();
+
+    extData::MockExternalDataIFaces* mockExtDataIfaces =
+        dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
+
+    ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
+        // NOLINTNEXTLINE
+        .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
+        mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        co_return;
+    });
+
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
+        // NOLINTNEXTLINE
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+        // NOLINTNEXTLINE
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    nlohmann::json jsonData = {
+        {"Directories",
+         {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/"},
+           {"DestinationPath",
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
+           {"Description",
+            "File to test immediate sync on non existent dest path"},
+           {"SyncDirection", "Active2Passive"},
+           {"SyncType", "Immediate"}}}}};
+
+    std::string srcPath{jsonData["Directories"][0]["Path"]};
+    std::string destPath{jsonData["Directories"][0]["DestinationPath"]};
+
+    // Create directories in source and destination
+    std::filesystem::create_directory(ManagerTest::tmpDataSyncDataDir /
+                                      "srcDir");
+    std::filesystem::create_directory(ManagerTest::tmpDataSyncDataDir /
+                                      "destDir");
+
+    writeConfig(jsonData);
+    sdbusplus::async::context ctx;
+
+    std::string data{"Src: Initial Data\n"};
+    std::string newData{"Src: Updated Data\n"};
+    std::string srcDirFile =
+        (ManagerTest::tmpDataSyncDataDir / "srcDir" / "Test").string();
+    ManagerTest::writeData(srcDirFile, data);
+    ASSERT_EQ(ManagerTest::readData(srcDirFile), data);
+    data_sync::Manager manager{ctx, std::move(extDataIface),
+                               ManagerTest::dataSyncCfgDir};
+
+    // Watch for dest path data change
+    data_sync::watch::inotify::DataWatcher dataWatcher(ctx, IN_NONBLOCK,
+                                                       IN_CREATE, destPath);
+    ctx.spawn(dataWatcher.onDataChange() |
+              sdbusplus::async::execution::then(
+                  [&newData]([[maybe_unused]] const auto& dataOps) {
+        std::string destDirFile =
+            (ManagerTest::tmpDataSyncDataDir / "srcDir" / "Test").string();
+        EXPECT_EQ(ManagerTest::readData(destDirFile), newData);
+    }));
+
+    // Write data after 1s so that the background sync events will be ready
+    // to catch.
+    ctx.spawn(
+        sdbusplus::async::sleep_for(ctx, 1s) |
+        sdbusplus::async::execution::then([&ctx, &srcDirFile, &newData]() {
+        ManagerTest::writeData(srcDirFile, newData);
+
+        ASSERT_EQ(ManagerTest::readData(srcDirFile), newData);
+        ctx.request_stop();
+    }));
+
+    ctx.run();
+}
