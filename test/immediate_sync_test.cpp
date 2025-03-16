@@ -34,10 +34,6 @@ TEST_F(ManagerTest, testDataChangeInFile)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile"},
@@ -108,10 +104,6 @@ TEST_F(ManagerTest, testDataChangeWhenSyncIsDisabled)
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPort())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
