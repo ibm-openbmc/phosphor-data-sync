@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 service_files = [
-    'xyz.openbmc_project.Control.SyncBMCData.service'
+    'xyz.openbmc_project.Control.SyncBMCData.service',
+    'SyncBMCData_rsync.service'
   ]
 
 systemd_system_unit_dir = dependency('systemd').get_variable(
