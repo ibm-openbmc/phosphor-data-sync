@@ -43,3 +43,8 @@ subdir('config')
 if not get_option('tests').disabled()
     subdir('test')
 endif
+
+# Install update sibling bmc ip address script
+install_data('scripts/update_sibling_bmc_ip.sh',
+  install_dir : libexecdir_installdir,
+  install_mode : 'rwxr-xr-x')
