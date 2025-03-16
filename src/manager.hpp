@@ -141,7 +141,7 @@ class Manager
      * @return Returns true if sync succeeds; otherwise, returns false
      *
      */
-    static sdbusplus::async::task<bool>
+    sdbusplus::async::task<bool>
         syncData(const config::DataSyncConfig& dataSyncCfg);
 
     /**

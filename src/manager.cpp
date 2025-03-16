@@ -157,11 +157,14 @@ sdbusplus::async::task<bool>
 #ifdef UNIT_TEST
     syncCmd.append(" "s);
 #else
-    // TODO Support for remote (i,e sibling BMC) copying needs to be added.
+    syncCmd.append(" rsync://localhost:"s);
+    syncCmd.append(_extDataIfaces->siblingBmcPort());
 #endif
 
     // Add destination data path
     syncCmd.append(dataSyncCfg._destPath.value_or(dataSyncCfg._path));
+
+    lg2::debug("Rsync command: {CMD}", "CMD", syncCmd);
     int result = std::system(syncCmd.c_str()); // NOLINT
     if (result != 0)
     {
