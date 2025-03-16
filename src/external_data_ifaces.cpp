@@ -10,7 +10,7 @@ sdbusplus::async::task<> ExternalDataIFaces::startExtDataFetches()
 {
     // NOLINTNEXTLINE
     co_return co_await sdbusplus::async::execution::when_all(
-        fetchBMCRedundancyMgrProps(), fetchSiblingBmcIP(),
+        fetchBMCRedundancyMgrProps(), fetchSiblingBmcPort(),
         fetchRbmcCredentials());
 }
 
@@ -34,14 +34,14 @@ void ExternalDataIFaces::bmcRedundancy(const BMCRedundancy& bmcRedundancy)
     _bmcRedundancy = bmcRedundancy;
 }
 
-const SiblingBmcIP& ExternalDataIFaces::siblingBmcIP() const
+const SiblingBmcPort& ExternalDataIFaces::siblingBmcPort() const
 {
-    return _siblingBmcIP;
+    return _siblingBmcPort;
 }
 
-void ExternalDataIFaces::siblingBmcIP(const SiblingBmcIP& siblingBmcIP)
+void ExternalDataIFaces::siblingBmcPort(const SiblingBmcPort& siblingBmcPort)
 {
-    _siblingBmcIP = siblingBmcIP;
+    _siblingBmcPort = siblingBmcPort;
 }
 
 void ExternalDataIFaces::rbmcCredentials(const RbmcCredentials& rbmcCredentials)

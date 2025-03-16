@@ -30,7 +30,7 @@ TEST_F(ManagerTest, testDataChangeInFile)
         co_return;
     });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPort())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -107,7 +107,7 @@ TEST_F(ManagerTest, testDataChangeWhenSyncIsDisabled)
         co_return;
     });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPort())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 

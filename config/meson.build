@@ -23,8 +23,8 @@ rsync_stunnel_conf_files = [
 
 rsync_stunnel_conf_data = configuration_data()
 
-rsync_stunnel_conf_data.set('BMC0_RSYNC_PORT', 1703)
-rsync_stunnel_conf_data.set('BMC1_RSYNC_PORT', 1704)
+rsync_stunnel_conf_data.set('BMC0_RSYNC_PORT', bmc0_rsync_port.to_int())
+rsync_stunnel_conf_data.set('BMC1_RSYNC_PORT', bmc1_rsync_port.to_int())
 rsync_stunnel_conf_data.set('BMC0_STUNNEL_PORT', 3071)
 rsync_stunnel_conf_data.set('BMC1_STUNNEL_PORT', 4071)
 

@@ -41,7 +41,7 @@ class ExternalDataIFacesImpl : public ExternalDataIFaces
     /**
      * @brief Used to retrieve the Sibling BMC IP from Dbus.
      */
-    sdbusplus::async::task<> fetchSiblingBmcIP() override;
+    sdbusplus::async::task<> fetchSiblingBmcPort() override;
 
     /**
      * @brief Used to retrieve the BMC Username and Password.
