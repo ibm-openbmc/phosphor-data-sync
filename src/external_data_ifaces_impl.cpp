@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include "config.h"
+
 #include "external_data_ifaces_impl.hpp"
 
 #include <xyz/openbmc_project/State/BMC/Redundancy/Sibling/client.hpp>
@@ -43,7 +45,7 @@ sdbusplus::async::task<> ExternalDataIFacesImpl::fetchBMCRedundancyMgrProps()
 }
 
 // NOLINTNEXTLINE
-sdbusplus::async::task<> ExternalDataIFacesImpl::fetchSiblingBmcIP()
+sdbusplus::async::task<> ExternalDataIFacesImpl::fetchSiblingBmcPort()
 {
     // TODO: Currently, the IP addresses for both BMCs are hardcoded.
     // Once the network DBus exposes the IPs, update the logic to retrieve
@@ -71,27 +73,13 @@ sdbusplus::async::task<> ExternalDataIFacesImpl::fetchSiblingBmcIP()
 
     if (siblingBMCPosition == 0)
     {
-        // Using the simics bmc0 eth0 IP address
-        siblingBmcIP("10.0.2.100");
+        siblingBmcPort(BMC0_RSYNC_PORT);
     }
     else
     {
-        // Using the simics bmc1 eth0 IP address
-        siblingBmcIP("10.2.2.100");
+        siblingBmcPort(BMC1_RSYNC_PORT);
     }
 
-    co_return;
-}
-
-// NOLINTNEXTLINE
-sdbusplus::async::task<> ExternalDataIFacesImpl::fetchRbmcCredentials()
-{
-    // TODO: Currently, the username and password for BMCs are hardcoded.
-    // Once user management DBus exposes the username and the encrypted password
-    // available, update the logic to retrieve them dynamically.
-
-    // here, username hardcode as service and password as 0penBmc0
-    rbmcCredentials(std::make_pair("service", "0penBmc0"));
     co_return;
 }
 

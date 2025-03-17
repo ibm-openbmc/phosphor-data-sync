@@ -12,19 +12,8 @@ project('rbmc_data_sync', 'cpp', 'c',
   )
 
 data_sync_config_dir = get_option('datadir') + '/phosphor-data-sync/config/data_sync_list/'
-
-
-foreach json_file_name : get_option('data_sync_list')
-
-    #check whether the json file given in the list exist and if so, install the same
-    json_file = files('config/data_sync_list/' + json_file_name + '.json')
-
-    install_data(
-        json_file,
-        install_dir : data_sync_config_dir
-    )
-
-endforeach
+bmc0_rsync_port = '1703'
+bmc1_rsync_port = '1704'
 
 # auto generate a config file with required build time configurations
 conf_data = configuration_data()
@@ -40,6 +29,12 @@ conf_data.set('DEFAULT_RETRY_ATTEMPTS',
 conf_data.set('DEFAULT_RETRY_INTERVAL',
                 get_option('retry_interval'),
                 description : 'Default retry interval for all data to be synced')
+conf_data.set_quoted('BMC0_RSYNC_PORT',
+                     bmc0_rsync_port,
+                     description : 'BMC0 rsyncd port')
+conf_data.set_quoted('BMC1_RSYNC_PORT',
+                     bmc1_rsync_port,
+                     description : 'BMC1 rsyncd port')
 
 conf_h_dep = declare_dependency(
     include_directories : include_directories('.'),
@@ -50,7 +45,14 @@ conf_h_dep = declare_dependency(
 )
 
 subdir('src')
+subdir('service_files')
+subdir('config')
 
 if not get_option('tests').disabled()
     subdir('test')
 endif
+
+# Install update sibling bmc ip address script
+install_data('scripts/update_sibling_bmc_ip.sh',
+  install_dir : libexecdir_installdir,
+  install_mode : 'rwxr-xr-x')

@@ -69,14 +69,14 @@ class Manager
     sdbusplus::async::task<> startFullSync();
 
     /**
-     * @brief Helper API that retrieves the sibling BMC IP and returns its
+     * @brief Helper API that retrieves the sibling BMC Port and returns its
      *        availability as a boolean.
      *
-     * @return True if sibling BMC IP is empty; otherwise False.
+     * @return True if sibling BMC Port is empty; otherwise False.
      */
     bool isSiblingBmcNotAvailable()
     {
-        return _extDataIfaces->siblingBmcIP().empty();
+        return _extDataIfaces->siblingBmcPort().empty();
     }
 
     /**
@@ -141,7 +141,7 @@ class Manager
      * @return Returns true if sync succeeds; otherwise, returns false
      *
      */
-    static sdbusplus::async::task<bool>
+    sdbusplus::async::task<bool>
         syncData(const config::DataSyncConfig& dataSyncCfg);
 
     /**

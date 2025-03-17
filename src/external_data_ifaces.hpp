@@ -11,10 +11,7 @@ namespace data_sync::ext_data
 using RBMC = sdbusplus::common::xyz::openbmc_project::state::bmc::Redundancy;
 using BMCRole = RBMC::Role;
 using BMCRedundancy = bool;
-using SiblingBmcIP = std::string;
-using RbmcUserName = std::string;
-using RbmcPassword = std::string;
-using RbmcCredentials = std::pair<RbmcUserName, RbmcPassword>;
+using SiblingBmcPort = std::string;
 
 /**
  * @class ExternalDataIFaces
@@ -62,14 +59,7 @@ class ExternalDataIFaces
      *
      * @return The Sibling BMC IP
      */
-    const SiblingBmcIP& siblingBmcIP() const;
-
-    /**
-     * @brief Used to obtain the BMC username and password
-     *
-     * @return BMC Username and Password
-     */
-    const RbmcCredentials& rbmcCredentials() const;
+    const SiblingBmcPort& siblingBmcPort() const;
 
   protected:
     /**
@@ -80,12 +70,7 @@ class ExternalDataIFaces
     /**
      * @brief Used to retrieve the Sibling BMC IP.
      */
-    virtual sdbusplus::async::task<> fetchSiblingBmcIP() = 0;
-
-    /**
-     * @brief Used to retrieve the BMC Username and Password.
-     */
-    virtual sdbusplus::async::task<> fetchRbmcCredentials() = 0;
+    virtual sdbusplus::async::task<> fetchSiblingBmcPort() = 0;
 
     /**
      * @brief A utility API to assign the retrieved BMC role.
@@ -108,21 +93,11 @@ class ExternalDataIFaces
     /**
      * @brief A utility API to assign the retrieved Sibling BMC IP.
      *
-     * @param[in] siblingBmcIP - The retrieved Sibling BMC IP.
+     * @param[in] siblingBmcPort - The retrieved Sibling BMC IP.
      *
      * @return None.
      */
-    void siblingBmcIP(const SiblingBmcIP& siblingBmcIP);
-
-    /**
-     * @brief A utility API to assign the retrieved BMC Username and Password.
-     *
-     * @param[in] rbmcCredentials - The retrieved Sibling BMC Username and
-     *                              Password.
-     *
-     * @return None.
-     */
-    void rbmcCredentials(const RbmcCredentials& rbmcCredentials);
+    void siblingBmcPort(const SiblingBmcPort& siblingBmcPort);
 
   private:
     /**
@@ -138,12 +113,7 @@ class ExternalDataIFaces
     /**
      * @brief hold the Sibling BMC IP
      */
-    SiblingBmcIP _siblingBmcIP;
-
-    /**
-     * @brief This is Pair, hold the BMCs Username and Password
-     */
-    RbmcCredentials _rbmcCredentials;
+    SiblingBmcPort _siblingBmcPort;
 };
 
 } // namespace data_sync::ext_data
