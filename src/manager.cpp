@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include "config.h"
+
 #include "manager.hpp"
 
 #include "data_watcher.hpp"
+#include "notify_sibling.hpp"
 
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -143,6 +146,52 @@ sdbusplus::async::task<> Manager::startSyncEvents()
     co_return;
 }
 
+void Manager::getRsyncCmd(std::string& cmd,
+                          const config::DataSyncConfig& dataSyncCfg,
+                          const std::string& srcPath, RsyncMode mode)
+{
+    using namespace std::string_literals;
+
+    if (mode == RsyncMode::Sync)
+    {
+        // Appending required flags to sync data between BMCs
+        // For more details about CLI options, refer rsync man page.
+        // https://download.samba.org/pub/rsync/rsync.1#OPTION_SUMMARY
+
+        cmd.append(
+            "rsync --compress --recursive --perms --group --owner --times --atimes"
+            " --update --relative --delete --delete-missing-args ");
+
+        if (dataSyncCfg._excludeList.has_value())
+        {
+            cmd.append(dataSyncCfg._excludeList->second);
+        }
+    }
+    else if (mode == RsyncMode::Notify)
+    {
+        // Appending the required flags to notify the siblng
+        cmd.append("rsync --compress --remove-source-files"s);
+    }
+
+    cmd.append(" "s + srcPath);
+
+#ifdef UNIT_TEST
+    cmd.append(" "s);
+#else
+    // TODO Support for remote (i,e sibling BMC) copying needs to be added.
+#endif
+
+    if (mode == RsyncMode::Sync)
+    {
+        // Add destination data path if configured
+        cmd.append(dataSyncCfg._destPath.value_or(fs::path("")));
+    }
+    else if (mode == RsyncMode::Notify)
+    {
+        cmd.append(" "s + NOTIFY_SERVICES_DIR);
+    }
+}
+
 // TODO: This isn't truly an async operation — Need to use popen/posix_spawn to
 // run the rsync command asynchronously but it will be handled as part of
 // concurrent sync changes.
@@ -151,37 +200,16 @@ sdbusplus::async::task<bool>
     Manager::syncData(const config::DataSyncConfig& dataSyncCfg,
                       fs::path srcPath)
 {
-    using namespace std::string_literals;
-
-    // For more details about CLI options, refer rsync man page.
-    // https://download.samba.org/pub/rsync/rsync.1#OPTION_SUMMARY
-    std::string syncCmd{
-        "rsync --compress --recursive --perms --group --owner --times --atimes"
-        " --update --relative --delete --delete-missing-args "};
-
-    if (dataSyncCfg._excludeList.has_value())
+    if (srcPath.empty())
     {
-        syncCmd.append(dataSyncCfg._excludeList->second);
+        srcPath = dataSyncCfg._path;
     }
 
-    if (!srcPath.empty())
-    {
-        syncCmd.append(" "s + srcPath.string());
-    }
-    else
-    {
-        syncCmd.append(" "s + dataSyncCfg._path.string());
-    }
+    std::string syncCmd{};
+    getRsyncCmd(syncCmd, dataSyncCfg, srcPath.string(), RsyncMode::Sync);
 
-#ifdef UNIT_TEST
-    syncCmd.append(" "s);
-#else
-    // TODO Support for remote (i,e sibling BMC) copying needs to be added.
-#endif
+    lg2::debug("Rsync command: {CMD}", "CMD", syncCmd);
 
-    // Add destination data path if configured
-    syncCmd.append(dataSyncCfg._destPath.value_or(fs::path("")));
-    lg2::debug("RSYNC CMD : {CMD}", "CMD", syncCmd);
     int result = std::system(syncCmd.c_str()); // NOLINT
 
     if (result != 0)
@@ -200,6 +228,31 @@ sdbusplus::async::task<bool>
         lg2::error("Error syncing: {PATH}", "PATH", dataSyncCfg._path);
 
         co_return false;
+    }
+    else if (dataSyncCfg._notifySibling.has_value())
+    {
+        // TODO: can't rely only on exit code. change to popen and read stdout
+        // also to confirm whether data got really updated.
+
+        if (dataSyncCfg._notifySibling.value()._paths.has_value())
+        {
+            if (!(dataSyncCfg._notifySibling.value()._paths.value().contains(
+                    srcPath)))
+            {
+                co_return true;
+            }
+        }
+
+        // initiate sibling notification
+        notify::NotifySibling notifySibling(dataSyncCfg, srcPath);
+        std::string notifyCmd{};
+        getRsyncCmd(notifyCmd, dataSyncCfg,
+                    notifySibling.getNotifyFilePath().string(),
+                    RsyncMode::Notify);
+        lg2::debug("Rsync sibling notify cmd : {CMD}", "CMD", notifyCmd);
+
+        // NOLINTNEXTLINE
+        [[maybe_unused]] int notifyResult = std::system(notifyCmd.c_str());
     }
     co_return true;
 }
