@@ -6,6 +6,7 @@
 
 #include "async_command_exec.hpp"
 #include "data_watcher.hpp"
+#include "notify_service.hpp"
 #include "notify_sibling.hpp"
 
 #include <nlohmann/json.hpp>
@@ -43,6 +44,8 @@ sdbusplus::async::task<> Manager::init()
             "Sync is disabled, data sync cannot be performed to the sibling BMC.");
         co_return;
     }
+
+    _ctx.spawn(monitorServiceNotifications());
 
     // TODO: Explore the possibility of running FullSync and Background Sync
     // concurrently
@@ -100,6 +103,52 @@ sdbusplus::async::task<> Manager::parseConfiguration()
         std::ranges::for_each(fs::directory_iterator(_dataSyncCfgDir), parse);
     }
 
+    co_return;
+}
+
+// NOLINTNEXTLINE
+sdbusplus::async::task<> Manager::monitorServiceNotifications()
+{
+    lg2::debug("Monitor for sibling notifications");
+
+    try
+    {
+        // TODO : Process the unprocessed notify requests during startup
+
+        // Start watching the NOTIFY_SERVICE_DIR
+        // Monitoring for IN_MOVED_TO only as rsync creates a temporary file in
+        // the destination and then rename to original file.
+        watch::inotify::DataWatcher notifyWatcher(
+            _ctx, IN_NONBLOCK, IN_MOVED_TO, NOTIFY_SERVICES_DIR);
+
+        while (!_ctx.stop_requested() && !_syncBMCDataIface.disable_sync())
+        {
+            if (auto dataOperations = co_await notifyWatcher.onDataChange();
+                !dataOperations.empty())
+            {
+                // Below is temporary check to avoid sync when disable sync is
+                // set to true.
+                // TODO: add receiver logic to stop sync events when disable
+                // sync is set to true.
+                if (_syncBMCDataIface.disable_sync())
+                {
+                    break;
+                }
+                for (const auto& [path, Op] : dataOperations)
+                {
+                    notify::NotifyService notifyService(_ctx, *_extDataIfaces,
+                                                        path);
+                }
+            }
+        }
+    }
+    catch (std::exception& e)
+    {
+        // TODO : Create error log if fails to create watcher.
+        lg2::error("Failed to create watcher for NOTIFY DIR. Exception : "
+                   "{EXCEP}",
+                   "EXCEP", e.what());
+    }
     co_return;
 }
 
