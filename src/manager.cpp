@@ -196,7 +196,8 @@ sdbusplus::async::task<>
 {
     try
     {
-        uint32_t eventMasksToWatch = IN_CLOSE_WRITE | IN_DELETE_SELF;
+        uint32_t eventMasksToWatch = IN_CLOSE_WRITE | IN_MOVED_FROM |
+                                     IN_MOVED_TO | IN_DELETE_SELF;
         if (dataSyncCfg._isPathDir)
         {
             eventMasksToWatch |= IN_CREATE | IN_DELETE;
