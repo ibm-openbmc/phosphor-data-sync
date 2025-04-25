@@ -157,7 +157,7 @@ sdbusplus::async::task<bool>
         "rsync --compress --recursive --perms --group --owner --times --atimes"
         " --update --relative --delete --delete-missing-args "};
 
-    syncCmd.append(" "s + dataSyncCfg._path);
+    syncCmd.append(" "s + dataSyncCfg._path.string());
 
 #ifdef UNIT_TEST
     syncCmd.append(" "s);
