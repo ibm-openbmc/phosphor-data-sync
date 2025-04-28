@@ -46,6 +46,7 @@ TEST_F(ManagerTest, testDataChangeInFile)
     fs::path srcPath{jsonData["Files"][0]["Path"]};
     fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
     fs::path destPath = destDir / fs::relative(srcPath, "/");
+    std::optional<std::vector<fs::path>> excludeList;
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -67,7 +68,7 @@ TEST_F(ManagerTest, testDataChangeInFile)
 
     // Watch for dest path data change
     data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destPath);
+        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destPath, excludeList);
     ctx.spawn(
         dataWatcher.onDataChange() |
         sdbusplus::async::execution::then(
@@ -121,6 +122,7 @@ TEST_F(ManagerTest, testDataDeleteInDir)
 
     fs::path srcDir{jsonData["Directories"][0]["Path"]};
     fs::path destDir{jsonData["Directories"][0]["DestinationPath"]};
+    std::optional<std::vector<fs::path>> excludeList;
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -146,7 +148,7 @@ TEST_F(ManagerTest, testDataDeleteInDir)
 
     // Watch for dest path data change
     data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_DELETE, destDirFile.parent_path());
+        ctx, IN_NONBLOCK, IN_DELETE, destDirFile.parent_path(), excludeList);
     ctx.spawn(dataWatcher.onDataChange() |
               sdbusplus::async::execution::then(
                   [&destDirFile]([[maybe_unused]] const auto& dataOps) {
@@ -203,6 +205,7 @@ TEST_F(ManagerTest, testDataDeletePathFile)
     fs::path srcPath{jsonData["Files"][0]["Path"]};
     fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
     fs::path destPath = destDir / fs::relative(srcPath, "/");
+    std::optional<std::vector<fs::path>> excludeList;
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -226,7 +229,7 @@ TEST_F(ManagerTest, testDataDeletePathFile)
 
     // Watch for dest path data change
     data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_DELETE_SELF, destPath);
+        ctx, IN_NONBLOCK, IN_DELETE_SELF, destPath, excludeList);
     ctx.spawn(dataWatcher.onDataChange() |
               sdbusplus::async::execution::then(
                   [&destPath]([[maybe_unused]] const auto& dataOps) {
@@ -381,6 +384,7 @@ TEST_F(ManagerTest, testDataCreateInSubDir)
 
     fs::path srcDir{jsonData["Directories"][0]["Path"]};
     fs::path destDir{jsonData["Directories"][0]["DestinationPath"]};
+    std::optional<std::vector<fs::path>> excludeList;
 
     // Create directories in source and destination
     std::filesystem::create_directory(srcDir);
@@ -393,8 +397,8 @@ TEST_F(ManagerTest, testDataCreateInSubDir)
                                ManagerTest::dataSyncCfgDir};
 
     // Watch for dest path data change
-    data_sync::watch::inotify::DataWatcher dataWatcher(ctx, IN_NONBLOCK,
-                                                       IN_CREATE, destDir);
+    data_sync::watch::inotify::DataWatcher dataWatcher(
+        ctx, IN_NONBLOCK, IN_CREATE, destDir, excludeList);
     ctx.spawn(dataWatcher.onDataChange() |
               sdbusplus::async::execution::then(
                   [&destDir, &srcDir]([[maybe_unused]] const auto& dataOps) {
@@ -457,6 +461,7 @@ TEST_F(ManagerTest, testFileMoveToAnotherDir)
     fs::path destDir2{jsonData["Directories"][1]["DestinationPath"]};
     fs::path destPath1 = destDir1 / fs::relative(srcPath1, "/");
     fs::path destPath2 = destDir2 / fs::relative(srcPath2, "/");
+    std::optional<std::vector<fs::path>> excludeList;
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -486,10 +491,10 @@ TEST_F(ManagerTest, testFileMoveToAnotherDir)
     // File "Test" will get create at destPath2
 
     // Watch dest paths for data change
-    data_sync::watch::inotify::DataWatcher dataWatcher1(ctx, IN_NONBLOCK,
-                                                        IN_DELETE, destPath1);
-    data_sync::watch::inotify::DataWatcher dataWatcher2(ctx, IN_NONBLOCK,
-                                                        IN_CREATE, destPath2);
+    data_sync::watch::inotify::DataWatcher dataWatcher1(
+        ctx, IN_NONBLOCK, IN_DELETE, destPath1, excludeList);
+    data_sync::watch::inotify::DataWatcher dataWatcher2(
+        ctx, IN_NONBLOCK, IN_CREATE, destPath2, excludeList);
 
     ctx.spawn(dataWatcher1.onDataChange() |
               sdbusplus::async::execution::then(
@@ -513,6 +518,101 @@ TEST_F(ManagerTest, testFileMoveToAnotherDir)
         EXPECT_FALSE(fs::exists(srcPath1 / "Test"));
         EXPECT_TRUE(fs::exists(srcPath2 / "Test"));
         ASSERT_EQ(ManagerTest::readData(srcPath2 / "Test"), data);
+        ctx.request_stop();
+    }));
+
+    ctx.run();
+}
+
+TEST_F(ManagerTest, testExcludeFile)
+{
+    using namespace std::literals;
+    namespace extData = data_sync::ext_data;
+
+    std::unique_ptr<extData::ExternalDataIFaces> extDataIface =
+        std::make_unique<extData::MockExternalDataIFaces>();
+
+    extData::MockExternalDataIFaces* mockExtDataIfaces =
+        dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
+
+    ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
+        // NOLINTNEXTLINE
+        .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
+        mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        co_return;
+    });
+
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
+        // NOLINTNEXTLINE
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    nlohmann::json jsonData = {
+        {"Directories",
+         {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/"},
+           {"DestinationPath",
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
+           {"Description",
+            "Test the configured exclude list while immediate sync"},
+           {"SyncDirection", "Active2Passive"},
+           {"SyncType", "Immediate"},
+           {"ExcludeList",
+            {ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/fileX"}}}}}};
+
+    fs::path srcDir{jsonData["Directories"][0]["Path"]};
+    fs::path destDir{jsonData["Directories"][0]["DestinationPath"]};
+    fs::path excludeFile = jsonData["Directories"][0]["ExcludeList"][0];
+
+    std::optional<std::vector<fs::path>> excludeList;
+
+    // Create directories in source and destination
+    std::filesystem::create_directory(srcDir);
+    std::filesystem::create_directory(destDir);
+
+    writeConfig(jsonData);
+    sdbusplus::async::context ctx;
+
+    // Create 2 files inside srcDir
+    std::string data1{"Data written to file1"};
+    std::string dataExcludeFile{"Data written to excludeFile"};
+
+    fs::path file1 = srcDir / "file1";
+    ManagerTest::writeData(file1, data1);
+    ASSERT_EQ(ManagerTest::readData(file1), data1);
+    ManagerTest::writeData(excludeFile, dataExcludeFile);
+    ASSERT_EQ(ManagerTest::readData(excludeFile), dataExcludeFile);
+
+    // Watch dest path for data change
+    data_sync::watch::inotify::DataWatcher dataWatcher(
+        ctx, IN_NONBLOCK, IN_CREATE | IN_CLOSE_WRITE, destDir, excludeList);
+
+    data_sync::Manager manager{ctx, std::move(extDataIface),
+                               ManagerTest::dataSyncCfgDir};
+
+    std::string dataToFile1{"Data modified in file1"};
+    std::string dataToExcludeFile{"Data modified in ExcludeFile"};
+
+    ctx.spawn(dataWatcher.onDataChange() |
+              sdbusplus::async::execution::then(
+                  [&file1, &excludeFile, &destDir,
+                   &dataToFile1]([[maybe_unused]] const auto& dataOps) {
+        EXPECT_TRUE(fs::exists(destDir / fs::relative(file1, "/")));
+        ASSERT_EQ(ManagerTest::readData(destDir / fs::relative(file1, "/")),
+                  dataToFile1)
+            << "Data in file1 should modified at dest side";
+        EXPECT_FALSE(fs::exists(destDir / fs::relative(excludeFile, "/")))
+            << "fileX should excluded while syncing to the dest side";
+    }));
+
+    // Write to file after 1s so that the background sync events will be ready
+    // to catch.
+    ctx.spawn(
+        sdbusplus::async::sleep_for(ctx, 1s) |
+        sdbusplus::async::execution::then(
+            [&ctx, &file1, &excludeFile, &dataToExcludeFile, &dataToFile1]() {
+        ManagerTest::writeData(excludeFile, dataToExcludeFile);
+        ASSERT_EQ(ManagerTest::readData(excludeFile), dataToExcludeFile);
+        ManagerTest::writeData(file1, dataToFile1);
+        ASSERT_EQ(ManagerTest::readData(file1), dataToFile1);
         ctx.request_stop();
     }));
 

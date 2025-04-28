@@ -68,10 +68,13 @@ DataSyncConfig::DataSyncConfig(const nlohmann::json& config,
     if (config.contains("ExcludeList"))
     {
         _excludeList = config["ExcludeList"].get<std::vector<fs::path>>();
+        frameRsyncExcludeList(
+            config["ExcludeList"].get<std::vector<fs::path>>());
     }
     else
     {
         _excludeList = std::nullopt;
+        _rsyncExcludeList = std::nullopt;
     }
 
     if (config.contains("IncludeList"))
@@ -94,6 +97,21 @@ bool DataSyncConfig::operator==(const DataSyncConfig& dataSyncCfg) const
            _retry == dataSyncCfg._retry &&
            _excludeList == dataSyncCfg._excludeList &&
            _includeList == dataSyncCfg._includeList;
+}
+
+void DataSyncConfig::frameRsyncExcludeList(
+    const std::vector<fs::path>& excludeList)
+{
+    using namespace std::string_literals;
+    _rsyncExcludeList = std::string();
+    auto foldToRsyncString = [](std::string listToStr, const fs::path& entry) {
+        return std::move(listToStr) + " --filter='-/ " + entry.string() + "'";
+    };
+    *_rsyncExcludeList += std::ranges::fold_left(
+        excludeList, _rsyncExcludeList.value(), foldToRsyncString);
+
+    lg2::debug("Rsync CLI compatible exclude list : {LISTSTR} for [{PATH}]",
+               "LISTSTR", _rsyncExcludeList.value(), "PATH", this->_path);
 }
 
 std::optional<SyncDirection>
