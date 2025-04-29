@@ -13,10 +13,11 @@ namespace data_sync::watch::inotify
 DataWatcher::DataWatcher(
     sdbusplus::async::context& ctx, const int inotifyFlags,
     const uint32_t eventMasksToWatch, const fs::path& dataPathToWatch,
-    const std::optional<std::vector<fs::path>>& excludeList) :
+    const std::optional<std::vector<fs::path>>& excludeList,
+    const std::optional<std::vector<fs::path>>& includeList) :
     _inotifyFlags(inotifyFlags), _eventMasksToWatch(eventMasksToWatch),
     _dataPathToWatch(dataPathToWatch), _excludeList(excludeList),
-    _inotifyFileDescriptor(inotifyInit()),
+    _includeList(includeList), _inotifyFileDescriptor(inotifyInit()),
     _fdioInstance(
         std::make_unique<sdbusplus::async::fdio>(ctx, _inotifyFileDescriptor()))
 {
@@ -97,6 +98,19 @@ bool DataWatcher::isPathExcluded(const fs::path& path)
     return false;
 }
 
+bool DataWatcher::isPathIncluded(const fs::path& path)
+{
+    auto matchesOrChildPath = [&path](const auto& includePath) {
+        return (path / "").string().starts_with(includePath.string());
+    };
+    if (std::ranges::none_of(_includeList.value(), matchesOrChildPath))
+    {
+        lg2::debug("{PATH} not in includeList", "PATH", path);
+        return false;
+    }
+    return true;
+}
+
 void DataWatcher::createWatchers(const fs::path& pathToWatch)
 {
     auto pathToWatchExist = fs::exists(pathToWatch);
@@ -110,14 +124,26 @@ void DataWatcher::createWatchers(const fs::path& pathToWatch)
             auto addWatchIfDir = [this](const fs::path& entry) {
                 if (fs::is_directory(entry))
                 {
-                    // Exclude the directories if in exclude list or child of
-                    // exclude dir.
-                    if (_excludeList.has_value() && isPathExcluded(entry))
+                    // If ExcldueList is configured, exclude those directories
+                    // from monitoring and add watch for rest.
+                    // If IncludeList is configured, then monitor only those ans
+                    // exclude rest.
+                    if ((_excludeList.has_value() && isPathExcluded(entry)) ||
+                        (_includeList.has_value() && !(isPathIncluded(entry))))
                     {
                         lg2::debug("No watch added for {PATH}", "PATH", entry);
                         return;
                     }
                     addToWatchList(entry, _eventMasksToWatch);
+                }
+                else
+                {
+                    // If IncludeList is configured and has files, add watchers
+                    // for those files, not for the configured Dir paths.
+                    if (_includeList.has_value() && isPathIncluded(entry))
+                    {
+                        addToWatchList(entry, _eventMasksToWatch);
+                    }
                 }
             };
             std::ranges::for_each(fs::recursive_directory_iterator(pathToWatch),
@@ -224,7 +250,11 @@ std::optional<DataOperation>
     // If excludeList has files, will receive inotify events and will be
     // excluded from processing.
 
-    if (_excludeList.has_value() && isPathExcluded(eventReceivedFor))
+    // Also Skip the events received for the paths which are not in included
+    // list, if configured.
+
+    if ((_excludeList.has_value() && isPathExcluded(eventReceivedFor)) ||
+        (_includeList.has_value() && !(isPathIncluded(eventReceivedFor))))
     {
         lg2::debug("Skipping the received inotify event of mask : {MASK} for "
                    "{PATH}",
@@ -338,7 +368,8 @@ std::optional<DataOperation>
                 // Before modify watcher, check the created entry is part of
                 // exclude list or not.
 
-                if (_excludeList.has_value() && isPathExcluded(entry))
+                if ((_excludeList.has_value() && isPathExcluded(entry)) ||
+                    (_includeList.has_value() && !(isPathIncluded(entry))))
                 {
                     return false;
                 }

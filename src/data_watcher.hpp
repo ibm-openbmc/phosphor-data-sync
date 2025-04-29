@@ -110,7 +110,8 @@ class DataWatcher
      */
     DataWatcher(sdbusplus::async::context& ctx, int inotifyFlags,
                 uint32_t eventMasksToWatch, const fs::path& dataPathToWatch,
-                const std::optional<std::vector<fs::path>>& excludeList);
+                const std::optional<std::vector<fs::path>>& excludeList,
+                const std::optional<std::vector<fs::path>>& includeList);
 
     /**
      * @brief Destructor
@@ -159,6 +160,11 @@ class DataWatcher
      * @brief List of paths to be excluded from watching
      */
     std::optional<std::vector<fs::path>> _excludeList;
+
+    /**
+     * @brief List of paths must be watched under the configured directory
+     */
+    std::optional<std::vector<fs::path>> _includeList;
 
     /**
      * @brief The map of unique watch descriptors associated with an configured
@@ -216,6 +222,17 @@ class DataWatcher
      *           False : If path doesn't need to exlcude.
      */
     bool isPathExcluded(const fs::path& path);
+
+    /**
+     * @brief API to check whether the given path is part of include list
+     *        The API will check whether the given path is in the configured
+     *        includeList or the path is a child of any of the included path.
+     *
+     * @param[in] path - absolute path of the data
+     * returns : True : If path need to be inlcuded.
+     *           False : If path doesn't need to inlcude.
+     */
+    bool isPathIncluded(const fs::path& path);
 
     /** @brief API to create watchers for the given path and also for the
      * subdirectories if exists inside the configured directory path.
