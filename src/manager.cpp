@@ -154,7 +154,7 @@ sdbusplus::async::task<bool>
 {
     using namespace std::string_literals;
     std::string syncCmd{
-        "rsync --archive --compress --delete --delete-missing-args "};
+        "rsync --archive --compress --relative --delete --delete-missing-args "};
 
     syncCmd.append(" "s + dataSyncCfg._path);
 
@@ -169,9 +169,8 @@ sdbusplus::async::task<bool>
     syncCmd.append(rsyncdURL);
 #endif
 
-    // Add destination data path
-    syncCmd.append(dataSyncCfg._destPath.value_or(dataSyncCfg._path).string());
-    // syncCmd.append(dataSyncCfg._destPath.value_or(fs::path("")));
+    // Add destination data path if configured
+    syncCmd.append(dataSyncCfg._destPath.value_or(fs::path("")));
 
     lg2::debug("Rsync command: {CMD}", "CMD", syncCmd);
     int result = std::system(syncCmd.c_str()); // NOLINT
