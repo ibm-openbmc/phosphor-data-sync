@@ -154,7 +154,8 @@ sdbusplus::async::task<bool>
 {
     using namespace std::string_literals;
     std::string syncCmd{
-        "rsync --archive --compress --relative --delete --delete-missing-args "};
+        "rsync --compress --recursive --perms --group --owner --times --atimes"
+        " --update --relative --delete --delete-missing-args "};
 
     syncCmd.append(" "s + dataSyncCfg._path);
 
