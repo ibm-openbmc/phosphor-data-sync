@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <map>
+#include <mutex>
 
 namespace data_sync::watch::inotify
 {
@@ -130,6 +131,42 @@ class DataWatcher
      *                         received event
      */
     sdbusplus::async::task<DataOperations> onDataChange();
+
+    /**
+     * @brief API to get all the instances of the DataWatcher
+     *
+     * @returns std::vector<DataWatcher*> - A reference to the vector containing
+     * all instances of this class
+     */
+    static std::vector<DataWatcher*>& getAllWatchers()
+    {
+        static std::vector<DataWatcher*> instances;
+        return instances;
+    }
+
+    /**
+     * @brief API to get the reference to the static mutex to guard
+     * concurrent access to shared data (i.e., the vector of DataWatcher
+     * instances)
+     *
+     * @returns std::mutex& - A reference to the static mutex
+     */
+    static std::mutex& getMutex()
+    {
+        static std::mutex mtx;
+        return mtx;
+    }
+
+    /**
+     * @brief API to get the file descriptor of the inotify instance
+     *
+     * @returns std::map<WD, fs::path>& - A reference to the map of WD and their
+     * associated file paths.
+     */
+    const std::map<WD, fs::path>& getWatchDescriptors() const
+    {
+        return _watchDescriptors;
+    }
 
   private:
     /**
