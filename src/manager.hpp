@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <ranges>
+#include <unordered_set>
 #include <vector>
 
 namespace data_sync
@@ -201,6 +202,42 @@ class Manager
      * @return True if SyncEligible; otherwise False.
      */
     bool isSyncEligible(const config::DataSyncConfig& dataSyncCfg);
+
+    /**
+     * @brief A helper function which saves all currently watched paths to a
+     * JSON file.
+     */
+    static void saveWatchedPathsToFile();
+
+    /**
+     * @brief A helper function which reads paths from the given input file
+     * stream and compares each path against currently watched paths, then
+     * writes the result to same path `/tmp/data_sync_paths_info.lsv`.
+     *
+     * @param[in] filePath - Input file path containing one path per line to
+     * check.
+     *
+     * @return True if filePath present and succesfully wrote to it; otherwise
+     * False.
+     */
+    static bool watchedPathCheck(std::string& filePath);
+
+    /**
+     * @brief A helper function to handle logging when a SIGUSR1 signal is
+     * received.
+     *
+     * @param[in] signal - The signal value that triggered the handler.
+     */
+    static void logSignalHandler(int signal);
+
+    /**
+     * @brief A helper API to collect all the paths currently being watched for
+     * immediate sync.
+     *
+     * @returns std::unordered_set<std::string> - A set containing all the paths
+     * being watched.
+     */
+    static std::unordered_set<std::string> collectAllWatchedPaths();
 
     /**
      * @brief The async context object used to perform operations asynchronously
