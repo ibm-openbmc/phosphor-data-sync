@@ -5,12 +5,15 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
 
 namespace data_sync::config
 {
+
+namespace fs = std::filesystem;
 
 /**
  * @brief The enum contains all the sync directions.
@@ -83,6 +86,18 @@ struct DataSyncConfig
     DataSyncConfig(const nlohmann::json& config, bool isPathDir);
 
     /**
+     * @brief API to convert the user configured exclude list to a RSYNC CLI
+     * compatible string with --filter flag.
+     * Eg : If user configured exludeList has 2 paths as /x/y/path1 and
+     *      /x/y/path2, then the rsync cli string will be like below:
+     *
+     *      " --filter='-/ /x/y/path1' --filter='-/ /x/y/path2'"
+     *
+     * @param[in] excludeList - The list of paths to be excluded.
+     */
+    void frameRsyncExcludeList(const std::vector<fs::path>& excludeList);
+
+    /**
      * @brief Overload the == operator to compare objects.
      *
      * @param[in] dataSyncCfg - The object to check
@@ -130,7 +145,7 @@ struct DataSyncConfig
     /**
      * @brief The file or directory path to be synchronized.
      */
-    std::string _path;
+    fs::path _path;
 
     /**
      * @brief Bool flag to indicate whether the path is file or directory
@@ -140,7 +155,7 @@ struct DataSyncConfig
     /**
      * @brief The file or directory path to the destination to be synchronized.
      */
-    std::optional<std::string> _destPath;
+    std::optional<fs::path> _destPath;
 
     /**
      * @brief Used to get sync direction.
@@ -171,17 +186,23 @@ struct DataSyncConfig
      * @brief The list of paths to exclude from synchronization.
      *
      * @note Holds a value if the specific directory prefer to
-     *       exclude some file from synchronization.
+     *       exclude some file/directory from synchronization.
      */
-    std::optional<std::vector<std::string>> _excludeFileList;
+    std::optional<std::vector<fs::path>> _excludeList;
+
+    /**
+     * @brief The exclude List in RSYNC CLI string format
+     */
+    std::optional<std::string> _rsyncExcludeList;
 
     /**
      * @brief The list of paths to include from synchronization.
      *
      * @note Holds a value if the specific directory opts to
-     *       include only certain file during the synchronization.
+     *       include only certain file/directory during the
+     *       synchronization.
      */
-    std::optional<std::vector<std::string>> _includeFileList;
+    std::optional<std::vector<fs::path>> _includeList;
 
   private:
     /**

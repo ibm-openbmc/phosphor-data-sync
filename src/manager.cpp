@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include "config.h"
+
 #include "manager.hpp"
 
 #include "data_watcher.hpp"
@@ -7,6 +9,7 @@
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -148,21 +151,52 @@ sdbusplus::async::task<> Manager::startSyncEvents()
 // concurrent sync changes.
 sdbusplus::async::task<bool>
     // NOLINTNEXTLINE
-    Manager::syncData(const config::DataSyncConfig& dataSyncCfg)
+    Manager::syncData(const config::DataSyncConfig& dataSyncCfg,
+                      fs::path modifiedPath)
 {
     using namespace std::string_literals;
     std::string syncCmd{
-        "rsync --archive --compress --delete --delete-missing-args"};
-    syncCmd.append(" "s + dataSyncCfg._path);
+        "rsync --compress --recursive --perms --group --owner --times --atimes"
+        " --update --relative --delete --delete-missing-args "};
+
+    if (dataSyncCfg._excludeList.has_value())
+    {
+        syncCmd.append(dataSyncCfg._rsyncExcludeList.value());
+    }
+
+    if (!modifiedPath.empty())
+    {
+        // Configure modified path as SRC path rsync if available.
+        syncCmd.append(" "s + modifiedPath.string());
+    }
+    else if ((dataSyncCfg._includeList.has_value()) && (modifiedPath.empty()))
+    {
+        // Configure the paths in include List as SRC paths
+        auto appendToCmd = [&syncCmd](const auto& path) {
+            syncCmd.append(" "s + path.string());
+        };
+        std::ranges::for_each(dataSyncCfg._includeList.value(), appendToCmd);
+    }
+    else
+    {
+        syncCmd.append(" "s + dataSyncCfg._path.string());
+    }
 
 #ifdef UNIT_TEST
     syncCmd.append(" "s);
 #else
-    // TODO Support for remote (i,e sibling BMC) copying needs to be added.
+    static const std::string rsyncdURL(
+        std::format(" rsync://localhost:{}/{}",
+                    (_extDataIfaces->siblingBmcPos() == 0 ? BMC0_RSYNC_PORT
+                                                          : BMC1_RSYNC_PORT),
+                    RSYNCD_MODULE_NAME));
+    syncCmd.append(rsyncdURL);
 #endif
 
-    // Add destination data path
-    syncCmd.append(dataSyncCfg._destPath.value_or(dataSyncCfg._path));
+    // Add destination data path if configured
+    syncCmd.append(dataSyncCfg._destPath.value_or(fs::path("")));
+
+    lg2::debug("Rsync command: {CMD}", "CMD", syncCmd);
     int result = std::system(syncCmd.c_str()); // NOLINT
     if (result != 0)
     {
@@ -190,7 +224,8 @@ sdbusplus::async::task<>
 {
     try
     {
-        uint32_t eventMasksToWatch = IN_CLOSE_WRITE | IN_DELETE_SELF;
+        uint32_t eventMasksToWatch = IN_CLOSE_WRITE | IN_MOVED_FROM |
+                                     IN_MOVED_TO | IN_DELETE_SELF;
         if (dataSyncCfg._isPathDir)
         {
             eventMasksToWatch |= IN_CREATE | IN_DELETE;
@@ -198,7 +233,8 @@ sdbusplus::async::task<>
 
         // Create watcher for the dataSyncCfg._path
         watch::inotify::DataWatcher dataWatcher(
-            _ctx, IN_NONBLOCK, eventMasksToWatch, dataSyncCfg._path);
+            _ctx, IN_NONBLOCK, eventMasksToWatch, dataSyncCfg._path,
+            dataSyncCfg._excludeList, dataSyncCfg._includeList);
 
         while (!_ctx.stop_requested() && !_syncBMCDataIface.disable_sync())
         {
@@ -213,9 +249,9 @@ sdbusplus::async::task<>
                 {
                     break;
                 }
-                for ([[maybe_unused]] const auto& dataOp : dataOperations)
+                for (const auto& dataOp : dataOperations)
                 {
-                    co_await syncData(dataSyncCfg);
+                    co_await syncData(dataSyncCfg, std::get<0>(dataOp));
                 }
             }
         }

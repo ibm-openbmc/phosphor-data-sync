@@ -10,11 +10,14 @@
 namespace data_sync::watch::inotify
 {
 
-DataWatcher::DataWatcher(sdbusplus::async::context& ctx, const int inotifyFlags,
-                         const uint32_t eventMasksToWatch,
-                         const fs::path& dataPathToWatch) :
+DataWatcher::DataWatcher(
+    sdbusplus::async::context& ctx, const int inotifyFlags,
+    const uint32_t eventMasksToWatch, const fs::path& dataPathToWatch,
+    const std::optional<std::vector<fs::path>>& excludeList,
+    const std::optional<std::vector<fs::path>>& includeList) :
     _inotifyFlags(inotifyFlags), _eventMasksToWatch(eventMasksToWatch),
-    _dataPathToWatch(dataPathToWatch), _inotifyFileDescriptor(inotifyInit()),
+    _dataPathToWatch(dataPathToWatch), _excludeList(excludeList),
+    _includeList(includeList), _inotifyFileDescriptor(inotifyInit()),
     _fdioInstance(
         std::make_unique<sdbusplus::async::fdio>(ctx, _inotifyFileDescriptor()))
 {
@@ -82,6 +85,32 @@ void DataWatcher::addToWatchList(const fs::path& pathToWatch,
     }
 }
 
+bool DataWatcher::isPathExcluded(const fs::path& path)
+{
+    auto matchesOrParentOfPath = [&path](const auto& excludePath) {
+        return (path / "").string().starts_with(excludePath.string());
+    };
+    if (std::ranges::any_of(_excludeList.value(), matchesOrParentOfPath))
+    {
+        lg2::debug("{PATH} is in excludeList", "PATH", path);
+        return true;
+    }
+    return false;
+}
+
+bool DataWatcher::isPathIncluded(const fs::path& path)
+{
+    auto matchesOrChildPath = [&path](const auto& includePath) {
+        return (path / "").string().starts_with(includePath.string());
+    };
+    if (std::ranges::none_of(_includeList.value(), matchesOrChildPath))
+    {
+        lg2::debug("{PATH} not in includeList", "PATH", path);
+        return false;
+    }
+    return true;
+}
+
 void DataWatcher::createWatchers(const fs::path& pathToWatch)
 {
     auto pathToWatchExist = fs::exists(pathToWatch);
@@ -95,7 +124,26 @@ void DataWatcher::createWatchers(const fs::path& pathToWatch)
             auto addWatchIfDir = [this](const fs::path& entry) {
                 if (fs::is_directory(entry))
                 {
+                    // If ExcldueList is configured, exclude those directories
+                    // from monitoring and add watch for rest.
+                    // If IncludeList is configured, then monitor only those ans
+                    // exclude rest.
+                    if ((_excludeList.has_value() && isPathExcluded(entry)) ||
+                        (_includeList.has_value() && !(isPathIncluded(entry))))
+                    {
+                        lg2::debug("No watch added for {PATH}", "PATH", entry);
+                        return;
+                    }
                     addToWatchList(entry, _eventMasksToWatch);
+                }
+                else
+                {
+                    // If IncludeList is configured and has files, add watchers
+                    // for those files, not for the configured Dir paths.
+                    if (_includeList.has_value() && isPathIncluded(entry))
+                    {
+                        addToWatchList(entry, _eventMasksToWatch);
+                    }
                 }
             };
             std::ranges::for_each(fs::recursive_directory_iterator(pathToWatch),
@@ -166,8 +214,18 @@ std::optional<std::vector<EventInfo>> DataWatcher::readEvents()
         // NOLINTNEXTLINE to avoid cppcoreguidelines-pro-type-reinterpret-cast
         auto* receivedEvent = reinterpret_cast<inotify_event*>(&buffer[offset]);
 
-        receivedEvents.emplace_back(receivedEvent->wd, receivedEvent->name,
-                                    receivedEvent->mask);
+        if (((receivedEvent->mask & _eventMasksToWatch) != 0) ||
+            ((receivedEvent->mask & _eventMasksIfNotExists) != 0))
+        {
+            receivedEvents.emplace_back(receivedEvent->wd, receivedEvent->name,
+                                        receivedEvent->mask);
+        }
+        else
+        {
+            lg2::debug("Skipping the uninterested event : {MASK} for the "
+                       "configured path : {PATH}",
+                       "MASK", receivedEvent->mask, "PATH", _dataPathToWatch);
+        }
 
         offset += offsetof(inotify_event, name) + receivedEvent->len;
     }
@@ -190,6 +248,32 @@ void DataWatcher::processEvents(
 std::optional<DataOperation>
     DataWatcher::processEvent(const EventInfo& receivedEventInfo)
 {
+    fs::path eventReceivedFor =
+        _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
+        std::get<BaseName>(receivedEventInfo);
+
+    if (fs::is_directory(eventReceivedFor))
+    {
+        eventReceivedFor /= "";
+    }
+
+    // Skip the events received for the paths which are in excluded list.
+    // If excludeList has files, will receive inotify events and will be
+    // excluded from processing.
+
+    // Also Skip the events received for the paths which are not in included
+    // list, if configured.
+
+    if ((_excludeList.has_value() && isPathExcluded(eventReceivedFor)) ||
+        (_includeList.has_value() && !(isPathIncluded(eventReceivedFor))))
+    {
+        lg2::debug("Skipping the received inotify event of mask : {MASK} for "
+                   "{PATH}",
+                   "MASK", std::get<EventMask>(receivedEventInfo), "PATH",
+                   eventReceivedFor);
+        return std::nullopt;
+    }
+
     if ((std::get<EventMask>(receivedEventInfo) & IN_CLOSE_WRITE) != 0)
     {
         return processCloseWrite(receivedEventInfo);
@@ -201,6 +285,14 @@ std::optional<DataOperation>
          * Handle the creation of directories inside a monitoring DIR
          */
         return processCreate(receivedEventInfo);
+    }
+    else if ((std::get<EventMask>(receivedEventInfo) & IN_MOVED_FROM) != 0)
+    {
+        return processMovedFrom(receivedEventInfo);
+    }
+    else if ((std::get<EventMask>(receivedEventInfo) & IN_MOVED_TO) != 0)
+    {
+        return processMovedTo(receivedEventInfo);
     }
     else if ((std::get<EventMask>(receivedEventInfo) & IN_DELETE_SELF) != 0)
     {
@@ -284,6 +376,14 @@ std::optional<DataOperation>
             // and a new file/directory got created inside it.
 
             auto modifyWatchIfExpected = [this](const fs::path& entry) {
+                // Before modify watcher, check the created entry is part of
+                // exclude list or not.
+
+                if ((_excludeList.has_value() && isPathExcluded(entry)) ||
+                    (_includeList.has_value() && !(isPathIncluded(entry))))
+                {
+                    return false;
+                }
                 if (_dataPathToWatch.string().starts_with(entry.string()))
                 {
                     // Created DIR is in the tree of the configured path.
@@ -338,6 +438,42 @@ std::optional<DataOperation>
                 modifyWatchIfExpected);
             return std::make_pair(absCreatedPath, DataOps::COPY);
         }
+    }
+    return std::nullopt;
+}
+
+std::optional<DataOperation>
+    DataWatcher::processMovedFrom(const EventInfo& receivedEventInfo)
+{
+    // Case 1 : A file inside a watching directory is moved to some other
+    // directory
+    // Case 2 : A file inside a watching directory is renamed to new name.
+
+    fs::path absMovedPath =
+        _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
+        std::get<BaseName>(receivedEventInfo);
+    if (absMovedPath.string().starts_with(_dataPathToWatch.string()))
+    {
+        lg2::debug("Processing IN_MOVED_FROM for {PATH}", "PATH", absMovedPath);
+        return std::make_pair(absMovedPath, DataOps::COPY);
+    }
+    return std::nullopt;
+}
+
+std::optional<DataOperation>
+    DataWatcher::processMovedTo(const EventInfo& receivedEventInfo)
+{
+    // Case 1 : If a file inside a configured and watching directory is renamed.
+    // Case 2 : A file is moved to a configured and watching directory.
+    // Case 3 : If a configured and watching file itself is renamed.
+    fs::path absCopiedPath =
+        _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
+        std::get<BaseName>(receivedEventInfo);
+
+    if (absCopiedPath.string().starts_with(_dataPathToWatch.string()))
+    {
+        lg2::debug("Processing IN_MOVED_TO for {PATH}", "PATH", absCopiedPath);
+        return std::make_pair(absCopiedPath, DataOps::COPY);
     }
     return std::nullopt;
 }

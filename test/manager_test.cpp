@@ -34,8 +34,8 @@ TEST_F(ManagerTest, ParseDataSyncCfg)
                         "Periodicity": "PT1S",
                         "RetryAttempts": 1,
                         "RetryInterval": "PT10M",
-                        "ExcludeFilesList": ["/directory/file/to/ignore"],
-                        "IncludeFilesList": ["/directory/file/to/consider"]
+                        "ExcludeList": ["/directory/file/to/ignore"],
+                        "IncludeList": ["/directory/file/to/consider"]
                     }
                 ]
             }
@@ -53,11 +53,7 @@ TEST_F(ManagerTest, ParseDataSyncCfg)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 

@@ -1,5 +1,7 @@
 #include "manager_test.hpp"
 
+namespace fs = std::filesystem;
+
 std::filesystem::path ManagerTest::dataSyncCfgDir;
 std::filesystem::path ManagerTest::tmpDataSyncDataDir;
 nlohmann::json ManagerTest::commonJsonData;
@@ -19,11 +21,7 @@ TEST_F(ManagerTest, PeriodicDataSyncTest)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -31,14 +29,15 @@ TEST_F(ManagerTest, PeriodicDataSyncTest)
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile1"},
            {"DestinationPath",
-            ManagerTest::tmpDataSyncDataDir.string() + "/destFile1"},
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
            {"Description", "Parse test file"},
            {"SyncDirection", "Bidirectional"},
            {"SyncType", "Periodic"},
            {"Periodicity", "PT1S"}}}}};
 
-    std::string srcFile{jsonData["Files"][0]["Path"]};
-    std::string destFile{jsonData["Files"][0]["DestinationPath"]};
+    fs::path srcFile{jsonData["Files"][0]["Path"]};
+    fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
+    fs::path destFile = destDir / fs::relative(srcFile, "/");
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -90,11 +89,7 @@ TEST_F(ManagerTest, PeriodicDataSyncDelayFileTest)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -102,14 +97,15 @@ TEST_F(ManagerTest, PeriodicDataSyncDelayFileTest)
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile1"},
            {"DestinationPath",
-            ManagerTest::tmpDataSyncDataDir.string() + "/destFile1"},
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
            {"Description", "Parse test file"},
            {"SyncDirection", "Bidirectional"},
            {"SyncType", "Periodic"},
            {"Periodicity", "PT1S"}}}}};
 
-    std::string srcFile{jsonData["Files"][0]["Path"]};
-    std::string destFile{jsonData["Files"][0]["DestinationPath"]};
+    fs::path srcFile{jsonData["Files"][0]["Path"]};
+    fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
+    fs::path destFile = destDir / fs::relative(srcFile, "/");
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -161,11 +157,7 @@ TEST_F(ManagerTest, PeriodicDataSyncMultiRWTest)
         co_return;
     });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -173,14 +165,15 @@ TEST_F(ManagerTest, PeriodicDataSyncMultiRWTest)
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile2"},
            {"DestinationPath",
-            ManagerTest::tmpDataSyncDataDir.string() + "/destFile2"},
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
            {"Description", "Parse test file"},
            {"SyncDirection", "Active2Passive"},
            {"SyncType", "Periodic"},
            {"Periodicity", "PT1S"}}}}};
 
-    std::string srcFile{jsonData["Files"][0]["Path"]};
-    std::string destFile{jsonData["Files"][0]["DestinationPath"]};
+    fs::path srcFile{jsonData["Files"][0]["Path"]};
+    fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
+    fs::path destFile = destDir / fs::relative(srcFile, "/");
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -236,11 +229,7 @@ TEST_F(ManagerTest, PeriodicDataSyncP2ATest)
         co_return;
     });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -248,14 +237,15 @@ TEST_F(ManagerTest, PeriodicDataSyncP2ATest)
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile3"},
            {"DestinationPath",
-            ManagerTest::tmpDataSyncDataDir.string() + "/destFile3"},
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
            {"Description", "Parse test file"},
            {"SyncDirection", "Passive2Active"},
            {"SyncType", "Periodic"},
            {"Periodicity", "PT1S"}}}}};
 
-    std::string srcFile{jsonData["Files"][0]["Path"]};
-    std::string destFile{jsonData["Files"][0]["DestinationPath"]};
+    fs::path srcFile{jsonData["Files"][0]["Path"]};
+    fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
+    fs::path destFile = destDir / fs::relative(srcFile, "/");
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -299,11 +289,7 @@ TEST_F(ManagerTest, PeriodicDisablePropertyTest)
         co_return;
     });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -311,14 +297,15 @@ TEST_F(ManagerTest, PeriodicDisablePropertyTest)
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile2"},
            {"DestinationPath",
-            ManagerTest::tmpDataSyncDataDir.string() + "/destFile2"},
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
            {"Description", "Parse test file"},
            {"SyncDirection", "Active2Passive"},
            {"SyncType", "Periodic"},
            {"Periodicity", "PT1S"}}}}};
 
-    std::string srcFile{jsonData["Files"][0]["Path"]};
-    std::string destFile{jsonData["Files"][0]["DestinationPath"]};
+    fs::path srcFile{jsonData["Files"][0]["Path"]};
+    fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
+    fs::path destFile = destDir / fs::relative(srcFile, "/");
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -371,11 +358,7 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteInDir)
         co_return;
     });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -389,17 +372,18 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteInDir)
            {"SyncType", "Periodic"},
            {"Periodicity", "PT1S"}}}}};
 
-    std::string srcDir{jsonData["Directories"][0]["Path"]};
-    std::string destDir{jsonData["Directories"][0]["DestinationPath"]};
+    fs::path srcDir{jsonData["Directories"][0]["Path"]};
+    fs::path destDir{jsonData["Directories"][0]["DestinationPath"]};
+    fs::path destDirPath = destDir / fs::relative(srcDir, "/");
 
     // Create directories in source and destination
     std::filesystem::create_directory(srcDir);
-    std::filesystem::create_directory(destDir);
+    std::filesystem::create_directories(destDirPath);
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
 
-    std::string srcDirFile = srcDir + "Test";
-    std::string destDirFile = destDir + "Test";
+    fs::path srcDirFile = srcDir / "Test";
+    fs::path destDirFile = destDirPath / "Test";
 
     std::string data{"Src: Initial Data\n"};
     std::string destData{"Dest: Initial Data\n"};
@@ -452,11 +436,7 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteFile)
         co_return;
     });
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcIP())
-        // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
-
-    EXPECT_CALL(*mockExtDataIfaces, fetchRbmcCredentials())
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
@@ -465,20 +445,22 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteFile)
          {{{"Path",
             ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/TestFile"},
            {"DestinationPath",
-            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/TestFile"},
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
            {"Description", "Directory to test periodic sync on file deletion"},
            {"SyncDirection", "Active2Passive"},
            {"SyncType", "Periodic"},
            {"Periodicity", "PT1S"}}}}};
 
-    std::string srcPath{jsonData["Files"][0]["Path"]};
-    std::string destPath{jsonData["Files"][0]["DestinationPath"]};
+    fs::path srcPath{jsonData["Files"][0]["Path"]};
+    fs::path destDir{jsonData["Files"][0]["DestinationPath"]};
+    fs::path destPath = destDir / fs::relative(srcPath, "/");
 
     // Create directories in source and destination
     std::filesystem::create_directory(ManagerTest::tmpDataSyncDataDir.string() +
                                       "/srcDir");
-    std::filesystem::create_directory(ManagerTest::tmpDataSyncDataDir.string() +
-                                      "/destDir");
+    std::filesystem::create_directories(
+        destDir / fs::relative(srcPath.parent_path(), "/"));
+
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
 
@@ -488,7 +470,8 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteFile)
     ManagerTest::writeData(destPath, destData);
 
     ASSERT_EQ(ManagerTest::readData(srcPath), data);
-    ASSERT_EQ(ManagerTest::readData(destPath), destData);
+    ASSERT_EQ(ManagerTest::readData(destPath), destData)
+        << "DestPath data not matching..";
 
     data_sync::Manager manager{ctx, std::move(extDataIface),
                                ManagerTest::dataSyncCfgDir};
@@ -511,4 +494,96 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteFile)
     ctx.run();
 
     EXPECT_FALSE(std::filesystem::exists(destPath));
+}
+
+TEST_F(ManagerTest, PeriodicDataSyncTestWithExcludeList)
+{
+    using namespace std::literals;
+    namespace ed = data_sync::ext_data;
+
+    std::unique_ptr<ed::ExternalDataIFaces> extDataIface =
+        std::make_unique<ed::MockExternalDataIFaces>();
+
+    ed::MockExternalDataIFaces* mockExtDataIfaces =
+        dynamic_cast<ed::MockExternalDataIFaces*>(extDataIface.get());
+
+    EXPECT_CALL(*mockExtDataIfaces, fetchSiblingBmcPos())
+        // NOLINTNEXTLINE
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
+        // NOLINTNEXTLINE
+        .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
+        mockExtDataIfaces->setBMCRole(ed::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
+        co_return;
+    });
+
+    nlohmann::json jsonData = {
+        {"Directories",
+         {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/"},
+           {"DestinationPath",
+            ManagerTest::tmpDataSyncDataDir.string() + "/destDir/"},
+           {"Description", "Test periodic sync with multiple exclude paths"},
+           {"SyncDirection", "Active2Passive"},
+           {"SyncType", "Periodic"},
+           {"Periodicity", "PT1S"},
+           {"ExcludeList",
+            {ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/subDirX/",
+             ManagerTest::tmpDataSyncDataDir.string() +
+                 "/srcDir/dirFileX"}}}}}};
+
+    fs::path srcPath{jsonData["Directories"][0]["Path"]};
+    fs::path destDir{jsonData["Directories"][0]["DestinationPath"]};
+    fs::path dirFile1 = srcPath / "dirFile1";
+    fs::path dirFileX = srcPath / "dirFileX";
+    fs::path subDirX = srcPath / "subDirX";
+    fs::path destPath = destDir / fs::relative(srcPath, "/");
+    fs::path destDirFile1 = destDir / fs::relative(dirFile1, "/");
+    fs::path destDirFileX = destDir / fs::relative(dirFileX, "/");
+    fs::path destSubDirX = destDir / fs::relative(subDirX, "/");
+
+    writeConfig(jsonData);
+    sdbusplus::async::context ctx;
+
+    // Create src and dest directories.
+    fs::create_directory(srcPath);
+    fs::create_directories(subDirX);
+    fs::create_directory(destDir);
+
+    std::string dataDirFile1{"Data in dirFile1"};
+    std::string dataDirFileX{"Data in dirFileX"};
+    std::string dataSubDirXFile{"Data in subDirXFile"};
+
+    ManagerTest::writeData(dirFile1, dataDirFile1);
+    ASSERT_EQ(ManagerTest::readData(dirFile1), dataDirFile1);
+    ManagerTest::writeData(dirFileX, dataDirFileX);
+    ASSERT_EQ(ManagerTest::readData(dirFileX), dataDirFileX);
+    ManagerTest::writeData(subDirX / "file", dataSubDirXFile);
+    ASSERT_EQ(ManagerTest::readData(subDirX / "file"), dataSubDirXFile);
+
+    data_sync::Manager manager{ctx, std::move(extDataIface),
+                               ManagerTest::dataSyncCfgDir};
+
+    EXPECT_FALSE(fs::exists(destPath))
+        << "In destination no src files shouldn't exists as sync doesn't "
+        << "initiated so far after manager is spawned";
+
+    std::string updatedData{"Data is updated"};
+    ManagerTest::writeData(dirFileX, updatedData);
+    ASSERT_EQ(ManagerTest::readData(dirFileX), updatedData);
+    ctx.spawn(sdbusplus::async::sleep_for(ctx, 1.2s) |
+              sdbusplus::async::execution::then([&destPath, &destDirFile1,
+                                                 &dataDirFile1, &destDirFileX,
+                                                 &destSubDirX]() {
+        EXPECT_TRUE(fs::exists(destPath));
+        EXPECT_EQ(ManagerTest::readData(destDirFile1), dataDirFile1);
+        EXPECT_FALSE(fs::exists(destDirFileX));
+        EXPECT_FALSE(fs::exists(destSubDirX));
+    }));
+
+    ctx.spawn(
+        sdbusplus::async::sleep_for(ctx, 1.5s) |
+        sdbusplus::async::execution::then([&ctx]() { ctx.request_stop(); }));
+    ctx.run();
 }
