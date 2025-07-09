@@ -5,6 +5,7 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <cstring>
+#include <ranges>
 #include <string>
 
 namespace data_sync::watch::inotify
@@ -48,6 +49,87 @@ int DataWatcher::inotifyInit() const
         throw std::runtime_error("inotify_init1 failed");
     }
     return fd;
+}
+
+std::string DataWatcher::eventName(uint32_t eventMask)
+{
+    std::vector<std::string> events{};
+
+    if ((eventMask & IN_ACCESS) != 0)
+    {
+        events.emplace_back("IN_ACCESS");
+    }
+    if ((eventMask & IN_ATTRIB) != 0)
+    {
+        events.emplace_back("IN_ATTRIB");
+    }
+    if ((eventMask & IN_CLOSE_WRITE) != 0)
+    {
+        events.emplace_back("IN_CLOSE_WRITE");
+    }
+    if ((eventMask & IN_CLOSE_NOWRITE) != 0)
+    {
+        events.emplace_back("IN_CLOSE_NOWRITE");
+    }
+    if ((eventMask & IN_CREATE) != 0)
+    {
+        events.emplace_back("IN_CREATE");
+    }
+    if ((eventMask & IN_DELETE) != 0)
+    {
+        events.emplace_back("IN_DELETE");
+    }
+    if ((eventMask & IN_DELETE_SELF) != 0)
+    {
+        events.emplace_back("IN_DELETE_SELF");
+    }
+    if ((eventMask & IN_MODIFY) != 0)
+    {
+        events.emplace_back("IN_MODIFY");
+    }
+    if ((eventMask & IN_MOVE_SELF) != 0)
+    {
+        events.emplace_back("IN_MOVE_SELF");
+    }
+    if ((eventMask & IN_MOVED_FROM) != 0)
+    {
+        events.emplace_back("IN_MOVED_FROM");
+    }
+    if ((eventMask & IN_MOVED_TO) != 0)
+    {
+        events.emplace_back("IN_MOVED_TO");
+    }
+    if ((eventMask & IN_OPEN) != 0)
+    {
+        events.emplace_back("IN_OPEN");
+    }
+    if ((eventMask & IN_IGNORED) != 0)
+    {
+        events.emplace_back("IN_IGNORED");
+    }
+    if ((eventMask & IN_ISDIR) != 0)
+    {
+        events.emplace_back("IN_ISDIR");
+    }
+    if ((eventMask & IN_Q_OVERFLOW) != 0)
+    {
+        events.emplace_back("IN_Q_OVERFLOW");
+    }
+    if ((eventMask & IN_UNMOUNT) != 0)
+    {
+        events.emplace_back("IN_UNMOUNT");
+    }
+
+    if (events.empty())
+    {
+        return "UNMAPPED_EVENT[" + std::to_string(eventMask) + "]";
+    }
+
+    return std::ranges::fold_left(
+        events | std::views::drop(1), events[0],
+        [](const std::string& iEvents, const std::string& event) {
+        return iEvents + " | " + event;
+    });
 }
 
 fs::path DataWatcher::getExistingParentPath(const fs::path& dataPath)
@@ -166,6 +248,10 @@ std::optional<std::vector<EventInfo>> DataWatcher::readEvents()
         // NOLINTNEXTLINE to avoid cppcoreguidelines-pro-type-reinterpret-cast
         auto* receivedEvent = reinterpret_cast<inotify_event*>(&buffer[offset]);
 
+        lg2::debug("Received {EVENTS} for wd : {WD} and name : {NAME}",
+                   "EVENTS", eventName(receivedEvent->mask), "WD",
+                   receivedEvent->wd, "NAME", receivedEvent->name);
+
         receivedEvents.emplace_back(receivedEvent->wd, receivedEvent->name,
                                     receivedEvent->mask);
 
@@ -211,8 +297,8 @@ std::optional<DataOperation>
     }
     else
     {
-        lg2::debug("Received an uninterested inotify event with mask : {MASK} ",
-                   "MASK", std::get<EventMask>(receivedEventInfo));
+        lg2::debug("Skipping the uninterested inotify event [{EVENTS}] ",
+                   "EVENTS", eventName(std::get<EventMask>(receivedEventInfo)));
         return std::nullopt;
     }
     return std::nullopt;
