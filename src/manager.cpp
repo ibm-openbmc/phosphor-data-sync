@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
+#include <csignal>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -46,7 +47,83 @@ sdbusplus::async::task<> Manager::init()
         co_await startFullSync();
     }
 
+    std::signal(SIGUSR1, logSignalHandler);
     co_return co_await startSyncEvents();
+}
+
+std::unordered_set<std::string> Manager::collectAllWatchedPaths()
+{
+    std::unordered_set<std::string> watchedPaths;
+    for (const auto* watcher : watch::inotify::DataWatcher::getAllWatchers())
+    {
+        std::ranges::transform(
+            watcher->getWatchDescriptors(),
+            std::inserter(watchedPaths, watchedPaths.end()),
+            [](const auto& wdPathPair) { return wdPathPair.second.string(); });
+    }
+    return watchedPaths;
+}
+
+void Manager::saveWatchedPathsToFile()
+{
+    std::string storeWatchedPath = "/tmp/data_sync_paths_info.json";
+    try
+    {
+        data_sync::persist::util::writeFile(
+            nlohmann::json(collectAllWatchedPaths()), storeWatchedPath);
+        lg2::info("Wrote all watched paths to file: {FILE}", "FILE",
+                  storeWatchedPath);
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Error writing all watched paths to file: {ERROR}", "ERROR",
+                   e);
+    }
+}
+
+bool Manager::watchedPathCheck(std::string& filePath)
+{
+    std::ifstream infile{filePath};
+    if (!infile)
+    {
+        return false;
+    }
+    std::vector<std::string> lines(std::istream_iterator<std::string>{infile},
+                                   {});
+    std::unordered_set<std::string> watchedPaths = collectAllWatchedPaths();
+
+    if (std::ofstream outfile{std::string(filePath), std::ios::trunc}; outfile)
+    {
+        outfile << "Individual user entered paths results:\n";
+        for (const auto& line : lines)
+        {
+            outfile << (watchedPaths.contains(line) ? "Watching"
+                                                    : "Not Watching")
+                    << " path: " << line << '\n';
+        }
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+void Manager::logSignalHandler(int signal)
+{
+    lg2::info("Received signal: {SIGNAL}", "SIGNAL", signal);
+    std::string checkForWatchedPaths = "/tmp/data_sync_paths_info.lsv";
+    if (watchedPathCheck(checkForWatchedPaths))
+    {
+        lg2::info("Checked and wrote each path in file {FILE}", "FILE",
+                  checkForWatchedPaths);
+    }
+    else
+    {
+        lg2::info("Unable to open user input {FILE}, logging all watched paths",
+                  "FILE", checkForWatchedPaths);
+        saveWatchedPathsToFile();
+    }
 }
 
 // NOLINTNEXTLINE
