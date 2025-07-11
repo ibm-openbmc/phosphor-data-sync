@@ -5,6 +5,7 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <cstring>
+#include <ranges>
 #include <string>
 
 namespace data_sync::watch::inotify
@@ -48,6 +49,87 @@ int DataWatcher::inotifyInit() const
         throw std::runtime_error("inotify_init1 failed");
     }
     return fd;
+}
+
+std::string DataWatcher::eventName(uint32_t eventMask)
+{
+    std::vector<std::string> events{};
+
+    if ((eventMask & IN_ACCESS) != 0)
+    {
+        events.emplace_back("IN_ACCESS");
+    }
+    if ((eventMask & IN_ATTRIB) != 0)
+    {
+        events.emplace_back("IN_ATTRIB");
+    }
+    if ((eventMask & IN_CLOSE_WRITE) != 0)
+    {
+        events.emplace_back("IN_CLOSE_WRITE");
+    }
+    if ((eventMask & IN_CLOSE_NOWRITE) != 0)
+    {
+        events.emplace_back("IN_CLOSE_NOWRITE");
+    }
+    if ((eventMask & IN_CREATE) != 0)
+    {
+        events.emplace_back("IN_CREATE");
+    }
+    if ((eventMask & IN_DELETE) != 0)
+    {
+        events.emplace_back("IN_DELETE");
+    }
+    if ((eventMask & IN_DELETE_SELF) != 0)
+    {
+        events.emplace_back("IN_DELETE_SELF");
+    }
+    if ((eventMask & IN_MODIFY) != 0)
+    {
+        events.emplace_back("IN_MODIFY");
+    }
+    if ((eventMask & IN_MOVE_SELF) != 0)
+    {
+        events.emplace_back("IN_MOVE_SELF");
+    }
+    if ((eventMask & IN_MOVED_FROM) != 0)
+    {
+        events.emplace_back("IN_MOVED_FROM");
+    }
+    if ((eventMask & IN_MOVED_TO) != 0)
+    {
+        events.emplace_back("IN_MOVED_TO");
+    }
+    if ((eventMask & IN_OPEN) != 0)
+    {
+        events.emplace_back("IN_OPEN");
+    }
+    if ((eventMask & IN_IGNORED) != 0)
+    {
+        events.emplace_back("IN_IGNORED");
+    }
+    if ((eventMask & IN_ISDIR) != 0)
+    {
+        events.emplace_back("IN_ISDIR");
+    }
+    if ((eventMask & IN_Q_OVERFLOW) != 0)
+    {
+        events.emplace_back("IN_Q_OVERFLOW");
+    }
+    if ((eventMask & IN_UNMOUNT) != 0)
+    {
+        events.emplace_back("IN_UNMOUNT");
+    }
+
+    if (events.empty())
+    {
+        return "UNMAPPED_EVENT[" + std::to_string(eventMask) + "]";
+    }
+
+    return std::ranges::fold_left(
+        events | std::views::drop(1), events[0],
+        [](const std::string& iEvents, const std::string& event) {
+        return iEvents + " | " + event;
+    });
 }
 
 fs::path DataWatcher::getExistingParentPath(const fs::path& dataPath)
@@ -166,6 +248,10 @@ std::optional<std::vector<EventInfo>> DataWatcher::readEvents()
         // NOLINTNEXTLINE to avoid cppcoreguidelines-pro-type-reinterpret-cast
         auto* receivedEvent = reinterpret_cast<inotify_event*>(&buffer[offset]);
 
+        lg2::debug("Received {EVENTS} for wd : {WD} and name : {NAME}",
+                   "EVENTS", eventName(receivedEvent->mask), "WD",
+                   receivedEvent->wd, "NAME", receivedEvent->name);
+
         receivedEvents.emplace_back(receivedEvent->wd, receivedEvent->name,
                                     receivedEvent->mask);
 
@@ -211,8 +297,8 @@ std::optional<DataOperation>
     }
     else
     {
-        lg2::debug("Received an uninterested inotify event with mask : {MASK} ",
-                   "MASK", std::get<EventMask>(receivedEventInfo));
+        lg2::debug("Skipping the uninterested inotify event [{EVENTS}] ",
+                   "EVENTS", eventName(std::get<EventMask>(receivedEventInfo)));
         return std::nullopt;
     }
     return std::nullopt;
@@ -262,6 +348,7 @@ std::optional<DataOperation>
     // all the file events are handled using IN_CLOSE_WRITE
     if ((std::get<EventMask>(receivedEventInfo) & IN_ISDIR) != 0)
     {
+        std::error_code ec;
         fs::path absCreatedPath =
             _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
             std::get<BaseName>(receivedEventInfo) / "";
@@ -269,7 +356,7 @@ std::optional<DataOperation>
         lg2::debug("Processing an IN_CREATE for {PATH}", "PATH",
                    absCreatedPath);
         if (absCreatedPath.string().starts_with(_dataPathToWatch.string()) &&
-            !fs::equivalent(_dataPathToWatch, absCreatedPath))
+            !fs::equivalent(_dataPathToWatch, absCreatedPath, ec))
         {
             // The created dir is a child directory inside the configured data
             // path add watch for the created child subdirectories.
@@ -282,13 +369,13 @@ std::optional<DataOperation>
             // Was monitoring existing parent path of the configured data path
             // and a new file/directory got created inside it.
 
-            auto modifyWatchIfExpected = [this](const fs::path& entry) {
+            auto modifyWatchIfExpected = [this, &ec](const fs::path& entry) {
                 if (_dataPathToWatch.string().starts_with(entry.string()))
                 {
                     // Created DIR is in the tree of the configured path.
                     // Hence, Add watch for the created DIR and remove its
                     // parent watch until the JSON configured DIR creates.
-                    if (fs::equivalent(_dataPathToWatch, entry))
+                    if (fs::equivalent(_dataPathToWatch, entry, ec))
                     {
                         // Add configured event masks if created DIR is the
                         // configured path.
@@ -310,8 +397,9 @@ std::optional<DataOperation>
                     // of 'a' is known from the inotify event.
                     if (auto parent =
                             std::ranges::find_if(_watchDescriptors,
-                                                 [&entry](const auto& wd) {
-                        return (fs::equivalent(wd.second, entry.parent_path()));
+                                                 [&entry, &ec](const auto& wd) {
+                        return (
+                            fs::equivalent(wd.second, entry.parent_path(), ec));
                     });
                         parent != _watchDescriptors.end())
                     {
