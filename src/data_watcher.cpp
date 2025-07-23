@@ -20,6 +20,8 @@ DataWatcher::DataWatcher(sdbusplus::async::context& ctx, const int inotifyFlags,
         std::make_unique<sdbusplus::async::fdio>(ctx, _inotifyFileDescriptor()))
 {
     createWatchers(_dataPathToWatch);
+    std::lock_guard<std::mutex> lock(getMutex());
+    getAllWatchers().push_back(this);
 }
 
 DataWatcher::~DataWatcher()
@@ -33,6 +35,9 @@ DataWatcher::~DataWatcher()
             }
         });
     }
+    auto& instances = getAllWatchers();
+    instances.erase(std::remove(instances.begin(), instances.end(), this),
+                    instances.end());
 }
 
 int DataWatcher::inotifyInit() const
