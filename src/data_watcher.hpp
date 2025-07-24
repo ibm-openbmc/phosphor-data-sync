@@ -110,10 +110,11 @@ class DataWatcher
      *  @param[in] inotifyFlags - inotify flags to watch
      *  @param[in] eventMasksToWatch - mask of interested events to watch
      *  @param[in] dataPathToWatch - Path of the file/directory to be watched
+     *  @param[in] excludeList - List of paths to be excluded while syncing
      */
     DataWatcher(sdbusplus::async::context& ctx, int inotifyFlags,
-                uint32_t eventMasksToWatch,
-                const std::filesystem::path& dataPathToWatch);
+                uint32_t eventMasksToWatch, const fs::path& dataPathToWatch,
+                const std::optional<std::set<fs::path>>& excludeList);
 
     /**
      * @brief Destructor
@@ -156,7 +157,12 @@ class DataWatcher
     /**
      * @brief File/Directory path to be watched
      */
-    std::filesystem::path _dataPathToWatch;
+    fs::path _dataPathToWatch;
+
+    /**
+     * @brief List of paths to be excluded from watching
+     */
+    std::optional<std::set<fs::path>> _excludeList;
 
     /**
      * @brief The map of unique watch descriptors associated with an configured
@@ -221,6 +227,17 @@ class DataWatcher
      */
     void addToWatchList(const fs::path& pathToWatch,
                         uint32_t eventMasksToWatch);
+
+    /**
+     * @brief API to check whether the given path is part of exclude list.
+     *        The API will check whether the given path is in the configured
+     *        excludeList or the path is child of any of the excluded path.
+     *
+     * @param[in] path - absolute path of the data
+     * returns : True : If path need to be exlcuded.
+     *           False : If path doesn't need to exlcude.
+     */
+    bool isPathExcluded(const fs::path& path);
 
     /** @brief API to create watchers for the given path and also for the
      * subdirectories if exists inside the configured directory path.

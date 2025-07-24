@@ -72,24 +72,24 @@ DataSyncConfig::DataSyncConfig(const nlohmann::json& config,
         _retry = std::nullopt;
     }
 
-    if (config.contains("ExcludeFilesList"))
+    if (config.contains("ExcludeList"))
     {
-        _excludeFileList =
-            config["ExcludeFilesList"].get<std::vector<std::string>>();
+        _excludeList = config["ExcludeList"].get<std::set<fs::path>>();
+        frameRsyncExcludeList(config["ExcludeList"].get<std::set<fs::path>>());
     }
     else
     {
-        _excludeFileList = std::nullopt;
+        _excludeList = std::nullopt;
+        _rsyncExcludeList = std::nullopt;
     }
 
-    if (config.contains("IncludeFilesList"))
+    if (config.contains("IncludeList"))
     {
-        _includeFileList =
-            config["IncludeFilesList"].get<std::vector<std::string>>();
+        _includeList = config["IncludeList"].get<std::set<fs::path>>();
     }
     else
     {
-        _includeFileList = std::nullopt;
+        _includeList = std::nullopt;
     }
 }
 
@@ -101,8 +101,23 @@ bool DataSyncConfig::operator==(const DataSyncConfig& dataSyncCfg) const
            _syncType == dataSyncCfg._syncType &&
            _periodicityInSec == dataSyncCfg._periodicityInSec &&
            _retry == dataSyncCfg._retry &&
-           _excludeFileList == dataSyncCfg._excludeFileList &&
-           _includeFileList == dataSyncCfg._includeFileList;
+           _excludeList == dataSyncCfg._excludeList &&
+           _includeList == dataSyncCfg._includeList;
+}
+
+void DataSyncConfig::frameRsyncExcludeList(
+    const std::set<fs::path>& excludeList)
+{
+    using namespace std::string_literals;
+    _rsyncExcludeList = std::string();
+    auto foldToRsyncString = [](std::string listToStr, const fs::path& entry) {
+        return std::move(listToStr) + " --filter='-/ " + entry.string() + "'";
+    };
+    *_rsyncExcludeList += std::ranges::fold_left(
+        excludeList, _rsyncExcludeList.value(), foldToRsyncString);
+
+    lg2::debug("Rsync CLI compatible exclude list : {LISTSTR} for [{PATH}]",
+               "LISTSTR", _rsyncExcludeList.value(), "PATH", this->_path);
 }
 
 std::optional<SyncDirection>
