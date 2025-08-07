@@ -2,7 +2,11 @@
 
 #include "manager.hpp"
 
+#include "async_command_exec.hpp"
 #include "data_watcher.hpp"
+
+#include <fcntl.h>
+#include <spawn.h>
 
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -133,19 +137,36 @@ sdbusplus::async::task<> Manager::startSyncEvents()
         using enum config::SyncType;
         if (dataSyncCfg._syncType == Immediate)
         {
-            this->_ctx.spawn(this->monitorDataToSync(dataSyncCfg));
+            try
+            {
+                this->_ctx.spawn(this->monitorDataToSync(dataSyncCfg));
+            }
+            catch (const std::exception& e)
+            {
+                setSyncEventsHealth(SyncEventsHealth::Critical);
+                lg2::error(
+                    "Failed to configure immediate sync for {PATH}: {EXC}",
+                    "EXC", e, "PATH", dataSyncCfg._path);
+            }
         }
         else if (dataSyncCfg._syncType == Periodic)
         {
-            this->_ctx.spawn(this->monitorTimerToSync(dataSyncCfg));
+            try
+            {
+                this->_ctx.spawn(this->monitorTimerToSync(dataSyncCfg));
+            }
+            catch (const std::exception& e)
+            {
+                setSyncEventsHealth(SyncEventsHealth::Critical);
+                lg2::error("Failed to configure periodic sync for {PATH}: "
+                           "{EXC}",
+                           "EXC", e, "PATH", dataSyncCfg._path);
+            }
         }
     });
     co_return;
 }
 
-// TODO: This isn't truly an async operation — Need to use popen/posix_spawn to
-// run the rsync command asynchronously but it will be handled as part of
-// concurrent sync changes.
 sdbusplus::async::task<bool>
     // NOLINTNEXTLINE
     Manager::syncData(const config::DataSyncConfig& dataSyncCfg,
@@ -182,9 +203,10 @@ sdbusplus::async::task<bool>
     // Add destination data path if configured
     syncCmd.append(dataSyncCfg._destPath.value_or(fs::path("")));
     lg2::debug("RSYNC CMD : {CMD}", "CMD", syncCmd);
-    int result = std::system(syncCmd.c_str()); // NOLINT
 
-    if (result != 0)
+    data_sync::async::AsyncCommandExecutor executor(_ctx);
+    auto result = co_await executor.execCmd(syncCmd); // NOLINT
+    if (result.first != 0)
     {
         // TODOs:
         // 1. Retry based on rsync error code
@@ -342,15 +364,23 @@ sdbusplus::async::task<void> Manager::startFullSync()
     {
         // TODO: add receiver logic to stop fullsync when disable sync is set to
         // true.
-        if (isSyncEligible(cfg))
+        try
         {
-            _ctx.spawn(
-                syncData(cfg) |
-                stdexec::then([&syncResults, &spawnedTasks](bool result) {
-                syncResults.push_back(result);
-                spawnedTasks--; // Decrement the number of spawned tasks
-            }));
-            spawnedTasks++;     // Increment the number of spawned tasks
+            if (isSyncEligible(cfg))
+            {
+                _ctx.spawn(
+                    syncData(cfg) |
+                    stdexec::then([&syncResults, &spawnedTasks](bool result) {
+                    syncResults.push_back(result);
+                    spawnedTasks--; // Decrement the number of spawned tasks
+                }));
+                spawnedTasks++;     // Increment the number of spawned tasks
+            }
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("Spawn failed for full sync {EXC}", "EXC", e);
+            setFullSyncStatus(FullSyncStatus::FullSyncFailed);
         }
     }
 
