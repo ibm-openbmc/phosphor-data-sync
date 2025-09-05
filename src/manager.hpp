@@ -21,6 +21,12 @@ using SyncEventsHealth = sdbusplus::common::xyz::openbmc_project::control::
 
 namespace fs = std::filesystem;
 
+enum class RsyncMode
+{
+    Sync,  // perform sync
+    Notify // perform sibling notification
+};
+
 /**
  * @class Manager
  *
@@ -171,6 +177,17 @@ class Manager
     sdbusplus::async::task<bool>
         syncData(const config::DataSyncConfig& dataSyncCfg,
                  fs::path srcPath = fs::path{});
+
+    /**
+     * @brief API to frame the RSYNC CLI command
+     *
+     * @param[in] cmd - string where the framed RSYNC command holds.
+     * @param[in] dataSyncCfg - The data sync config to sync
+     * @param[in] mode - enum RsyncMode : sync or notify
+     */
+    static void getRsyncCmd(std::string& cmd,
+                            const config::DataSyncConfig& dataSyncCfg,
+                            const std::string& srcPath, RsyncMode mode);
 
     /**
      * @brief A helper to API to monitor data to sync if its changed
