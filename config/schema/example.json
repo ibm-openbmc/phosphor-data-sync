@@ -28,14 +28,19 @@
             "Periodicity": "PT1H",
             "RetryAttempts": 1,
             "RetryInterval": "PT10M",
-            "ExcludeFilesList": ["/Path/of/files/must/be/ignored/for/sync"],
-            "IncludeFilesList": ["/Path/of/files/must/be/considered/for/sync"]
+            "ExcludeList": ["/Path/of/files/must/be/ignored/for/sync"],
+            "IncludeList": ["/Path/of/files/must/be/considered/for/sync"]
         },
         {
             "Path": "/directory2/path/to/sync/",
             "Description": "Add details about the data and purpose of the synchronization",
             "SyncDirection": "Bidirectional",
-            "SyncType": "Immediate"
+            "SyncType": "Immediate",
+            "NotifySibling": {
+                "NotifyOnPaths": ["/var/lib/abcd"],
+                "Mode": "DBus",
+                "NotifyServices": ["Service1", "Service2"]
+            }
         }
     ]
 }
