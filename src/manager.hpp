@@ -164,13 +164,19 @@ class Manager
      *        performing a local copy instead.
      *
      * @param[in] dataSyncCfg - The data sync config to sync
+     * @param[in] srcPath - The optional source data path
+     * @param[in] vanishedPaths - List of vanished root paths reported by rsync
+                                  used to rebuild include-list filters for retry
+     * @param[in] retryCount - The current retry attempt count
      *
      * @return Returns true if sync succeeds; otherwise, returns false
      *
      */
     sdbusplus::async::task<bool>
         syncData(const config::DataSyncConfig& dataSyncCfg,
-                 fs::path srcPath = fs::path{});
+                 fs::path srcPath = fs::path{},
+                 std::vector<fs::path> vanishedPaths = {},
+                 size_t retryCount = 0);
 
     /**
      * @brief A helper to API to monitor data to sync if its changed

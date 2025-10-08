@@ -167,9 +167,39 @@ sdbusplus::async::task<> Manager::startSyncEvents()
 sdbusplus::async::task<bool>
     // NOLINTNEXTLINE
     Manager::syncData(const config::DataSyncConfig& dataSyncCfg,
-                      fs::path srcPath)
+                      fs::path srcPath, std::vector<fs::path> vanishedPaths,
+                      size_t retryCount)
 {
+    if (_syncBMCDataIface.disable_sync())
+    {
+        co_return false;
+    }
+
     using namespace std::string_literals;
+
+    const bool haveIncludeList = dataSyncCfg._includeList.has_value() &&
+                                 !dataSyncCfg._includeList->empty();
+
+    const fs::path currentSrcPath = srcPath.empty() ? dataSyncCfg._path
+                                                    : srcPath;
+
+    const size_t maxAttempts = dataSyncCfg._retry->_retryAttempts;
+    const size_t retryIntervalSec =
+        dataSyncCfg._retry->_retryIntervalInSec.count();
+
+    // On first try only, if this path is already in retry/syncing, skip that
+    if (retryCount == 0)
+    {
+        if (dataSyncCfg._syncInProgressPaths.count(currentSrcPath) != 0U)
+        {
+            lg2::debug(
+                "Skipping sync for [{SRC}]: a sync is already in progress",
+                "SRC", currentSrcPath);
+            co_return true;
+        }
+        // Mark the path as in-progress so subsequent retries know to skip it
+        dataSyncCfg._syncInProgressPaths.insert(currentSrcPath);
+    }
 
     // For more details about CLI options, refer rsync man page.
     // https://download.samba.org/pub/rsync/rsync.1#OPTION_SUMMARY
@@ -186,6 +216,21 @@ sdbusplus::async::task<bool>
     {
         syncCmd.append(" "s + srcPath.string());
     }
+    else if (!vanishedPaths.empty())
+    {
+        // framed include-list (built from vanished roots)
+        const std::string framedIncludeListCmd =
+            data_sync::retry::frameIncludeListCLI(dataSyncCfg, vanishedPaths);
+        syncCmd += framedIncludeListCmd;
+    }
+    else if ((dataSyncCfg._includeList.has_value()) && (srcPath.empty()))
+    {
+        // Configure the paths in include List as SRC paths
+        auto appendToCmd = [&syncCmd](const auto& path) {
+            syncCmd.append(" "s + path.string());
+        };
+        std::ranges::for_each(dataSyncCfg._includeList.value(), appendToCmd);
+    }
     else
     {
         syncCmd.append(" "s + dataSyncCfg._path.string());
@@ -198,33 +243,98 @@ sdbusplus::async::task<bool>
 #endif
 
     // Add destination data path if configured
-    syncCmd.append(dataSyncCfg._destPath.value_or(fs::path("")));
+    // TODO: Change the default destPath to empty once remote sync is enabled.
+    syncCmd.append(" "s +
+                   dataSyncCfg._destPath.value_or(fs::path("/")).string());
     lg2::debug("RSYNC CMD : {CMD}", "CMD", syncCmd);
 
     data_sync::async::AsyncCommandExecutor executor(_ctx);
     auto result = co_await executor.execCmd(syncCmd); // NOLINT
     lg2::debug("Rsync cmd output : {OUTPUT}", "OUTPUT", result.second);
-    if (result.first != 0)
+
+    if (result.first == 0)
     {
-        // TODOs:
-        // 1. Retry based on rsync error code
-        // 2. Create error log and Disable redundancy if retry fails
-        // 3. Perform a callout
-
-        // NOTE: The following line is commented out as part of a temporary
-        // workaround. We are forcing Full Sync to succeed even if data syncing
-        // fails. This change should be reverted once proper error handling is
-        // implemented.
-        // setSyncEventsHealth(SyncEventsHealth::Critical);
-
-        lg2::error(
-            "Error syncing [{PATH}], ErrCode : {ERRCODE}, Error : {ERROR}",
-            "PATH", dataSyncCfg._path, "ERRCODE", result.first, "ERROR",
-            result.second);
-
-        co_return false;
+        // Remove from in-progress after completing sync successfully
+        dataSyncCfg._syncInProgressPaths.erase(currentSrcPath);
+        co_return true;
     }
-    co_return true;
+
+    if (retryCount < maxAttempts)
+    {
+        if (haveIncludeList)
+        {
+            if (result.first == 24)
+            {
+                auto vanishedPaths =
+                    data_sync::retry::getVanishedSrcPaths(result.second);
+                lg2::warning(
+                    "exit=24; switching to framed include-list retry with {NUM} root(s).",
+                    "NUM", vanishedPaths.size());
+                co_await sleep_for(_ctx,
+                                   std::chrono::seconds(retryIntervalSec));
+                co_return co_await syncData(dataSyncCfg, fs::path{},
+                                            std::move(vanishedPaths),
+                                            retryCount + 1);
+            }
+
+            lg2::info(
+                "Retry {RETRY_COUNT}/{MAX_ATTEMPTS} (exit={ERROR_CODE}) retrying with same include list",
+                "RETRY_COUNT", retryCount + 1, "MAX_ATTEMPTS", maxAttempts,
+                "ERROR_CODE", result.first);
+            co_await sleep_for(_ctx, std::chrono::seconds(retryIntervalSec));
+            co_return co_await syncData(dataSyncCfg, fs::path{},
+                                        std::move(vanishedPaths),
+                                        retryCount + 1);
+        }
+        if (result.first == 24)
+        {
+            auto vanished =
+                data_sync::retry::getVanishedSrcPaths(result.second);
+            const fs::path& nextSrc = vanished.front();
+
+            lg2::warning(
+                "exit=24; retry with switching SRC [{OLD}] -> vanishedPath [{NEW}]",
+                "OLD", currentSrcPath, "NEW", nextSrc);
+
+            co_await sleep_for(_ctx, std::chrono::seconds(retryIntervalSec));
+            co_return co_await syncData(dataSyncCfg, nextSrc, {},
+                                        retryCount + 1);
+        }
+        else
+        {
+            lg2::info(
+                "Retry {RETRY_COUNT}/{MAX_ATTEMPTS} (exit={ERROR_CODE}) → [{SRC}]",
+                "RETRY_COUNT", retryCount + 1, "MAX_ATTEMPTS", maxAttempts,
+                "ERROR_CODE", result.first, "SRC", currentSrcPath);
+
+            co_await sleep_for(_ctx, std::chrono::seconds(retryIntervalSec));
+            co_return co_await syncData(dataSyncCfg, currentSrcPath, {},
+                                        retryCount + 1);
+        }
+    }
+
+    // If we reach here, all retry attempts have been exhausted
+    // Mark sync events health as critical
+    setSyncEventsHealth(SyncEventsHealth::Critical);
+
+    // Remove from in-progress after completing all sync attempts
+    dataSyncCfg._syncInProgressPaths.erase(currentSrcPath);
+
+    if (haveIncludeList)
+    {
+        lg2::error(
+            "Sync failed after {MAX_ATTEMPTS} attempts (exit {ERROR_CODE}); include_paths={INC_NUM}; vanished_roots={VAN_NUM}",
+            "MAX_ATTEMPTS", maxAttempts, "ERROR_CODE", result.first, "INC_NUM",
+            dataSyncCfg._includeList->size(), "VAN_NUM", vanishedPaths.size());
+    }
+    else
+    {
+        lg2::error(
+            "Sync failed after {MAX_ATTEMPTS} attempts (exit {ERROR_CODE}): [{SRC}]",
+            "MAX_ATTEMPTS", maxAttempts, "ERROR_CODE", result.first, "SRC",
+            currentSrcPath);
+    }
+    co_return false;
 }
 
 sdbusplus::async::task<>
@@ -408,15 +518,8 @@ sdbusplus::async::task<void> Manager::startFullSync()
     }
     else
     {
-        // Forcefully marking full sync as successful, even if data syncing
-        // fails.
-        // TODO: Revert this workaround once the proper logic is implemented
-        setFullSyncStatus(FullSyncStatus::FullSyncCompleted);
-        setSyncEventsHealth(SyncEventsHealth::Ok);
-        lg2::info("Full Sync passed temporarily despite sync failures");
-
-        // setFullSyncStatus(FullSyncStatus::FullSyncFailed);
-        // lg2::info("Full Sync failed");
+        setFullSyncStatus(FullSyncStatus::FullSyncFailed);
+        lg2::info("Full Sync failed");
     }
 
     // total duration/time diff of the Full Sync operation
