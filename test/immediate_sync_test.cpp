@@ -51,7 +51,8 @@ TEST_F(ManagerTest, testDataChangeInFile)
         {"Description", "Json to create an inotify watcher on destPath"},
         {"SyncDirection", "Active2Passive"},
         {"SyncType", "Immediate"}};
-    data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest, true);
+    [[maybe_unused]] data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest,
+                                                                   true);
 
     writeConfig(jsonData);
     sdbusplus::async::context ctx;
@@ -73,7 +74,7 @@ TEST_F(ManagerTest, testDataChangeInFile)
 
     // Watch for dest path data change
     data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, dataSyncCfg);
+        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destPath);
     ctx.spawn(
         dataWatcher.onDataChange() |
         sdbusplus::async::execution::then(
@@ -164,10 +165,11 @@ TEST_F(ManagerTest, testDataDeleteInDir)
         {"Description", "Json to create an inotify watcher on destPath"},
         {"SyncDirection", "Active2Passive"},
         {"SyncType", "Immediate"}};
-    data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest, true);
+    [[maybe_unused]] data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest,
+                                                                   true);
 
-    data_sync::watch::inotify::DataWatcher dataWatcher(ctx, IN_NONBLOCK,
-                                                       IN_DELETE, dataSyncCfg);
+    data_sync::watch::inotify::DataWatcher dataWatcher(
+        ctx, IN_NONBLOCK, IN_DELETE, destDirFile.parent_path());
     ctx.spawn(dataWatcher.onDataChange() |
               sdbusplus::async::execution::then(
                   [&destDirFile]([[maybe_unused]] const auto& dataOps) {
@@ -261,10 +263,11 @@ TEST_F(ManagerTest, testDataDeletePathFile)
         {"Description", "Json to create an inotify watcher on destPath"},
         {"SyncDirection", "Active2Passive"},
         {"SyncType", "Immediate"}};
-    data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest, true);
+    [[maybe_unused]] data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest,
+                                                                   true);
 
     data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_DELETE_SELF, dataSyncCfg);
+        ctx, IN_NONBLOCK, IN_DELETE_SELF, destPath);
     ctx.spawn(dataWatcher.onDataChange() |
               sdbusplus::async::execution::then(
                   [&destPath]([[maybe_unused]] const auto& dataOps) {
@@ -457,10 +460,11 @@ TEST_F(ManagerTest, testDataCreateInSubDir)
         {"Description", "Json to create an inotify watcher on destPath"},
         {"SyncDirection", "Active2Passive"},
         {"SyncType", "Immediate"}};
-    data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest, true);
+    [[maybe_unused]] data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest,
+                                                                   true);
 
     data_sync::watch::inotify::DataWatcher dataWatcher(ctx, IN_NONBLOCK,
-                                                       IN_CREATE, dataSyncCfg);
+                                                       IN_CREATE, destDir);
     // NOLINTNEXTLINE
     auto waitForDataChange = [&]() -> sdbusplus::async::task<void> {
         // NOLINTNEXTLINE
@@ -568,19 +572,21 @@ TEST_F(ManagerTest, testFileMoveToAnotherDir)
         {"Description", "Json to create an inotify watcher on destPath"},
         {"SyncDirection", "Active2Passive"},
         {"SyncType", "Immediate"}};
-    data_sync::config::DataSyncConfig dataSyncCfg1(jsonForDest1, true);
+    [[maybe_unused]] data_sync::config::DataSyncConfig dataSyncCfg1(
+        jsonForDest1, true);
 
     nlohmann::json jsonForDest2 = {
         {"Path", destPath / "dir2"},
         {"Description", "Json to create an inotify watcher on destPath"},
         {"SyncDirection", "Active2Passive"},
         {"SyncType", "Immediate"}};
-    data_sync::config::DataSyncConfig dataSyncCfg2(jsonForDest2, true);
+    [[maybe_unused]] data_sync::config::DataSyncConfig dataSyncCfg2(
+        jsonForDest2, true);
 
     data_sync::watch::inotify::DataWatcher dataWatcher1(
-        ctx, IN_NONBLOCK, IN_DELETE, dataSyncCfg1);
+        ctx, IN_NONBLOCK, IN_DELETE, (destPath / "dir1"));
     data_sync::watch::inotify::DataWatcher dataWatcher2(
-        ctx, IN_NONBLOCK, IN_CREATE, dataSyncCfg2);
+        ctx, IN_NONBLOCK, IN_CREATE, (destPath / "dir2"));
 
     ctx.spawn(dataWatcher1.onDataChange() |
               sdbusplus::async::execution::then(
@@ -689,10 +695,11 @@ TEST_F(ManagerTest, testExcludeFile)
         {"Description", "Json to create an inotify watcher on destPath"},
         {"SyncDirection", "Active2Passive"},
         {"SyncType", "Immediate"}};
-    data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest, true);
+    [[maybe_unused]] data_sync::config::DataSyncConfig dataSyncCfg(jsonForDest,
+                                                                   true);
 
     data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_CREATE | IN_CLOSE_WRITE, dataSyncCfg);
+        ctx, IN_NONBLOCK, IN_CREATE | IN_CLOSE_WRITE, destDir);
 
     data_sync::Manager manager{ctx, std::move(extDataIface),
                                ManagerTest::dataSyncCfgDir};
@@ -809,7 +816,7 @@ TEST_F(ManagerTest, ImmediateSyncVanishedPathRetrySucceeds)
     const std::string data{"sample data \n"};
 
     data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, dataSyncCfg);
+        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destFilePath2);
 
     auto waitForDataChange =
         // NOLINTNEXTLINE
