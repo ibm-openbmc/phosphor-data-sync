@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// #include <systemd/sd-journal.h>
+
+#include <nlohmann/json.hpp>
 #include <xyz/openbmc_project/Logging/Create/server.hpp>
 
 #include <cstdint>
 #include <tuple>
 #include <vector>
+
+using json = nlohmann::json;
 
 namespace data_sync
 {
@@ -48,7 +53,7 @@ class FFDCFile
     FFDCFile& operator=(FFDCFile&&) = delete;
 
     /**
-     * @brief The constructor creates the FFDC file with the given format  and
+     * @brief The constructor creates the FFDC file with the given format and
      * data.
      *
      * @param[in] format - The FFDC file format.
@@ -170,5 +175,42 @@ class FFDCFile
 
 }; // end of FFDCFile class
 
+/**
+ * @class FFDCFileSet
+ *
+ * @brief This class is used to create a set of FFDC files for an error log
+ * request.
+ */
+class FFDCFileSet
+{
+  public:
+    FFDCFileSet() = delete;
+    FFDCFileSet(const FFDCFileSet&) = delete;
+    FFDCFileSet& operator=(const FFDCFileSet&) = delete;
+    FFDCFileSet(FFDCFileSet&&) = delete;
+    FFDCFileSet& operator=(FFDCFileSet&&) = delete;
+
+    /**
+     * @brief The constructor creates FFDC files for an error request.
+     *
+     * @param[in] calloutData   - The details of callout data if it exists in
+     * JSON format to create FFDC files.
+     */
+    FFDCFileSet(const json& calloutData);
+
+  private:
+    /**
+     * @brief Function to create FFDC files with the callout details.
+     *
+     * @param[in] calloutData - The details of callout data in JSON format.
+     */
+    void createFFDCFilesForCallouts(const json& calloutData);
+
+    /**
+     * @brief Stores the vector containing list of created FFDCFiles.
+     */
+    std::vector<std::unique_ptr<FFDCFile>> _ffdcFiles;
+
+}; // end of FFDCFileSet class
 } // namespace error_log
 } // namespace data_sync
