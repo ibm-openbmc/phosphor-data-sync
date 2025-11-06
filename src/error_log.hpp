@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <systemd/sd-journal.h>
+
+#include <nlohmann/json.hpp>
 #include <xyz/openbmc_project/Logging/Create/server.hpp>
 
 #include <cstdint>
 #include <tuple>
 #include <vector>
+
+using json = nlohmann::json;
 
 namespace data_sync
 {
@@ -48,7 +53,7 @@ class FFDCFile
     FFDCFile& operator=(FFDCFile&&) = delete;
 
     /**
-     * @brief The constructor creates the FFDC file with the given format  and
+     * @brief The constructor creates the FFDC file with the given format and
      * data.
      *
      * @param[in] format - The FFDC file format.
@@ -170,5 +175,72 @@ class FFDCFile
 
 }; // end of FFDCFile class
 
+class FFDCFileSet
+{
+  public:
+    FFDCFileSet() = delete;
+    FFDCFileSet(const FFDCFileSet&) = delete;
+    FFDCFileSet& operator=(const FFDCFileSet&) = delete;
+    FFDCFileSet(FFDCFileSet&&) = delete;
+    FFDCFileSet& operator=(FFDCFileSet&&) = delete;
+
+    /**
+     * @brief The constructor creates FFDC files for an error request.
+     *
+     * @param[in] collectTraces - Set to true to create the FFDC file for
+     * traces.
+     * @param[in] calloutData   - The details of callout data if it exists in
+     * JSON format to create FFDC files.
+     */
+    FFDCFileSet(bool collectTraces, const json& calloutData);
+
+  private:
+    /**
+     * @brief A Helper API to geth the given field value from systemd journal
+     * context
+     *
+     * @param[in] journal   - The systemd journal to get the field value
+     * @param[in] fieldName - The field name to get it's value
+     *
+     * @return The field value on success
+     */
+    static std::optional<std::string>
+        getTraceFieldValue(sd_journal* journal, const std::string& fieldName);
+
+    /**
+     * @brief A Helper API to get the last requested number of journal traces
+     *        from systemd journal entries based on the fieldName and
+     *        fieldValue to write to FFDC Files.
+     *        By default, it collects the last 10 traces.
+     *
+     * @param[in] fieldValue - The field value to search.
+     * @param[in] maxTraces  - The maximum number of trace lines to fetch from
+     * journal.
+     *
+     * @return Optional vector of strings containing journal trace lines on
+     * success.
+     */
+    static std::optional<std::vector<std::string>>
+        getJournalTraces(const std::string& fieldValue,
+                         unsigned int maxTraces = 10);
+
+    /**
+     * @brief Function to create FFDC file for trace data.
+     */
+    void createFFDCFilesForTraces();
+
+    /**
+     * @brief Function to create FFDC files with the callout details.
+     *
+     * @param[in] calloutData - The details of callout data in JSON format.
+     */
+    void createFFDCFilesForCallouts(const json& calloutData);
+
+    /**
+     * @brief Stores the vector containing list of created FFDCFiles.
+     */
+    std::vector<std::unique_ptr<FFDCFile>> _ffdcFiles;
+
+}; // end of FFDCFileSet class
 } // namespace error_log
 } // namespace data_sync
