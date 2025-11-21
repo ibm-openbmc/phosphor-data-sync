@@ -53,6 +53,7 @@ sdbusplus::async::task<> Manager::init()
     {
         // NOLINTNEXTLINE
         co_await startFullSync();
+        co_return co_await startSyncEvents();
     }
 
     // NOLINTNEXTLINE
@@ -106,6 +107,19 @@ sdbusplus::async::task<> Manager::parseConfiguration()
     co_return;
 }
 
+sdbusplus::async::task<> Manager::processPendingNotifications()
+{
+    lg2::info("processing pending notification requests");
+
+    for (const auto& path : fs::directory_iterator(NOTIFY_SERVICES_DIR))
+    {
+        // TODO:  Make it co routine if needs
+        notify::NotifyService notifyService(_ctx, *_extDataIfaces, path);
+    }
+
+    co_return;
+}
+
 // NOLINTNEXTLINE
 sdbusplus::async::task<> Manager::monitorServiceNotifications()
 {
@@ -113,7 +127,10 @@ sdbusplus::async::task<> Manager::monitorServiceNotifications()
 
     try
     {
-        // TODO : Process the unprocessed notify requests during startup
+        if (!fs::is_empty(NOTIFY_SERVICES_DIR))
+        {
+            _ctx.spawn(processPendingNotifications());
+        }
 
         // Start watching the NOTIFY_SERVICE_DIR
         // Monitoring for IN_MOVED_TO only as rsync creates a temporary file in
