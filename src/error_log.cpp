@@ -81,5 +81,193 @@ void FFDCFile::removeFFDCFile()
     std::remove(_fileName.data());
 }
 
+FFDCFileSet::FFDCFileSet(const bool collectTraces, const json& calloutData)
+{
+    if (collectTraces)
+    {
+        try
+        {
+            createFFDCFilesForTraces();
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("Exception while collecting traces for FFDC: {ERROR}",
+                       "ERROR", e.what());
+        }
+    }
+
+    if (!calloutData.is_null())
+    {
+        try
+        {
+            createFFDCFilesForCallouts(calloutData);
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error(
+                "Exception while collecting callout data for FFDC: {ERROR}",
+                "ERROR", e.what());
+        }
+    }
+}
+
+std::optional<std::string>
+    FFDCFileSet::getTraceFieldValue(sd_journal* journal,
+                                    const std::string& fieldName)
+{
+    const void* raw_data{nullptr};
+    size_t length{0};
+
+    auto rc = sd_journal_get_data(journal, fieldName.c_str(), &raw_data,
+                                  &length);
+    if (0 == rc)
+    {
+        std::string fieldValue(static_cast<const char*>(raw_data), length);
+
+        // The data returned by sd_journal_get_data will be prefixed with the
+        // field name and "=".
+        if (auto fieldValPos = fieldValue.find('=');
+            fieldValPos != std::string::npos)
+        {
+            // Just return field value
+            return fieldValue.substr(fieldValPos + 1);
+        }
+        else
+        {
+            // Should not happen as per sd_journal_get_data documentation
+            lg2::error("Failed to find the journal field separator [=] in the "
+                       "retrieved field {FIELD_VALUE}",
+                       "FIELD_VALUE", fieldValue);
+        }
+    }
+    else
+    {
+        lg2::error(
+            "Failed to get the given journal  {FIELD_NAME}, errorno:{ERROR_NO},"
+            "errormsg: {ERROR_MSG}",
+            "FIELD_NAME", fieldName, "ERROR_NO", rc, "ERROR_MSG", strerror(rc));
+    }
+    return std::nullopt;
+}
+
+std::optional<std::vector<std::string>>
+    FFDCFileSet::getJournalTraces(const std::string& fieldValue,
+                                  const unsigned int maxTraces)
+{
+    // systemd journal context
+    sd_journal* journal;
+    int ret = sd_journal_open(&journal, SD_JOURNAL_LOCAL_ONLY);
+    if (0 == ret)
+    {
+        std::vector<std::string> traces;
+
+        // To get the latest entries, iterating the journal in reverse order
+        SD_JOURNAL_FOREACH_BACKWARDS(journal)
+        {
+            auto retValue = getTraceFieldValue(journal, "SYSLOG_IDENTIFIER");
+            // Get the next traces if not the fieldValue
+            if (!retValue.has_value() || *retValue != fieldValue)
+            {
+                continue;
+            }
+
+            // Get timeStamp
+            std::string timeStamp;
+            uint64_t usec{0};
+            if (0 == sd_journal_get_realtime_usec(journal, &usec))
+            {
+                // Converting realtime microseconds to human readable format
+                // E.g. Nov 06 2025 14:23:45
+                std::time_t timeInSec = static_cast<time_t>(usec / 1000000);
+                std::stringstream ss;
+                ss << std::put_time(std::localtime(&timeInSec),
+                                    "%b %d %Y %H:%M:%S");
+                timeStamp = ss.str();
+            }
+
+            // Get Process PID
+            std::string pid;
+            retValue = getTraceFieldValue(journal, "_PID");
+            if (retValue.has_value())
+            {
+                pid = *retValue;
+            }
+
+            // Get Message
+            std::string message;
+            retValue = getTraceFieldValue(journal, "MESSAGE");
+            if (retValue.has_value())
+            {
+                message = *retValue;
+            }
+
+            // Format -> Timestamp : ProcessName[ProcessPID] : Message
+            std::stringstream trace;
+            trace << timeStamp << " : " << fieldValue << "[" << pid
+                  << "] : " << message;
+            traces.push_back(trace.str());
+
+            if (traces.size() == maxTraces)
+            {
+                break;
+            }
+        }
+
+        sd_journal_close(journal);
+
+        if (!traces.empty())
+        {
+            return traces;
+        }
+        else
+        {
+            lg2::info("No journal traces found for {FIELD_VALUE}",
+                      "FIELD_VALUE", fieldValue);
+        }
+    }
+    else
+    {
+        lg2::error(
+            "Failed to get systemd journal traces for {FIELD_VALUE}, error code:"
+            "{ERROR_CODE}, error message: {ERROR_MSG}",
+            "FIELD_VALUE", fieldValue, "ERROR", ret, "ERROR_MSG",
+            strerror(ret));
+    }
+    return std::nullopt;
+}
+
+void FFDCFileSet::createFFDCFilesForTraces()
+{
+    // Not including rsyncd to prevent overflow of traces
+    // Since the stdout and error cases of rsync are added in data sync traces
+    std::vector<std::string> apps{"phosphor-rbmc-data-sync-mgr", "stunnel"};
+    for (const auto& app : apps)
+    {
+        auto traces = getJournalTraces(app);
+        if (traces.has_value() && !traces->empty())
+        {
+            std::string traceData;
+            for (const auto& line : *traces)
+            {
+                traceData.append(line);
+                if (!line.ends_with('\n'))
+                {
+                    traceData.append("\n");
+                }
+            }
+            // For traces FFDCFomat::Text - FFDC SubType "0", FFDC Version "0"
+            _ffdcFiles.emplace_back(
+                std::make_unique<FFDCFile>(FFDCFormat::Text, 0, 0, traceData));
+        }
+    }
+}
+
+void FFDCFileSet::createFFDCFilesForCallouts(const json& calloutData)
+{
+    // For callouts - FFDC SubType "0xCA", FFDC Version "0x01"
+    _ffdcFiles.emplace_back(std::make_unique<FFDCFile>(
+        FFDCFormat::JSON, 0xCA, 0x01, calloutData.dump()));
+}
+
 } // namespace error_log
 } // namespace data_sync
