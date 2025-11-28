@@ -4,6 +4,7 @@
 
 #include "external_data_ifaces.hpp"
 
+#include <nlohmann/json.hpp>
 #include <sdbusplus/async.hpp>
 
 namespace data_sync::ext_data
@@ -55,6 +56,21 @@ class ExternalDataIFacesImpl : public ExternalDataIFaces
      * @brief Used to retrieve the BMC Position from Dbus.
      */
     sdbusplus::async::task<> fetchBMCPosition() override;
+
+    /**
+     * @brief Create the error log with additional FFDC data and callout details
+     *
+     * @param[in] errMsg - the error message id which is be defined
+     *                     in the error log message registries.
+     * @param[in] errSeverity - The error log severity
+     * @param[in] calloutsDetails - callouts details to add in the error log
+     *
+     * @note If the caller doesn't pass the  calloutsDetails
+     * values then, this API won't execute those sections in the error log.
+     */
+    sdbusplus::async::task<>
+        createErrorLog(const std::string& errMsg, const Level& errSeverity,
+                       const json& calloutsDetails = {}) override;
 
     /**
      * @brief Used to get the async context

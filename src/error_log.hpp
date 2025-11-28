@@ -198,6 +198,17 @@ class FFDCFileSet
      */
     FFDCFileSet(const json& calloutData);
 
+    /**
+     * @brief Used to get the created FFDC files details to add in the error
+     *        log
+     *
+     * @param[out] ffdcFilesInfo - Used to return FFDCFiles with its
+     *                             information
+     *
+     * @return void
+     */
+    void transformFFDCFiles(FFDCFileInfoSet& ffdcFilesInfo);
+
   private:
     /**
      * @brief Function to create FFDC files with the callout details.

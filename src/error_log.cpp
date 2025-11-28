@@ -106,5 +106,13 @@ void FFDCFileSet::createFFDCFilesForCallouts(const json& calloutData)
         FFDCFormat::JSON, 0xCA, 0x01, calloutData.dump()));
 }
 
+void FFDCFileSet::transformFFDCFiles(FFDCFileInfoSet& ffdcFilesInfo)
+{
+    std::transform(_ffdcFiles.begin(), _ffdcFiles.end(),
+                   std::back_inserter(ffdcFilesInfo), [](const auto& ffdcFile) {
+        return std::make_tuple(ffdcFile->getFormat(), ffdcFile->getSubType(),
+                               ffdcFile->getVersion(), ffdcFile->getFD());
+    });
+}
 } // namespace error_log
 } // namespace data_sync
