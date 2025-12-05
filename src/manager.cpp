@@ -6,6 +6,7 @@
 
 #include "async_command_exec.hpp"
 #include "data_watcher.hpp"
+#include "notify_service.hpp"
 #include "notify_sibling.hpp"
 
 #include <nlohmann/json.hpp>
@@ -43,6 +44,16 @@ sdbusplus::async::task<> Manager::init()
             "Sync is disabled, data sync cannot be performed to the sibling BMC.");
         co_return;
     }
+
+// Sibling notification logic is tested independently in notify_service_test
+// Disabled here to avoid unwanted watch additions while testing manager logic.
+// TODO: Revisit after coroutine-based sender/receiver logic is implemented.
+#ifndef UNIT_TEST
+    if (fs::exists(NOTIFY_SERVICES_DIR))
+    {
+        _ctx.spawn(monitorServiceNotifications());
+    }
+#endif
 
     // TODO: Explore the possibility of running FullSync and Background Sync
     // concurrently
@@ -100,6 +111,65 @@ sdbusplus::async::task<> Manager::parseConfiguration()
         std::ranges::for_each(fs::directory_iterator(_dataSyncCfgDir), parse);
     }
 
+    co_return;
+}
+
+sdbusplus::async::task<> Manager::processPendingNotifications()
+{
+    {
+        static constexpr auto notifyServiceDir = NOTIFY_SERVICES_DIR;
+        lg2::info("Initiates processing of pending sync notification requests"
+                  " from {DIR}",
+                  "DIR", notifyServiceDir);
+    }
+
+    for (const auto& path : fs::directory_iterator(NOTIFY_SERVICES_DIR))
+    {
+        // TODO:  Make it co routine if needs
+        notify::NotifyService notifyService(_ctx, *_extDataIfaces, path);
+    }
+
+    co_return;
+}
+
+// NOLINTNEXTLINE
+sdbusplus::async::task<> Manager::monitorServiceNotifications()
+{
+    lg2::debug("Monitor for sibling notifications...");
+
+    try
+    {
+        _ctx.spawn(processPendingNotifications());
+
+        // Start watching the NOTIFY_SERVICE_DIR
+        // Monitoring for IN_MOVED_TO only as rsync creates a temporary file in
+        // the destination and then rename to original file.
+        watch::inotify::DataWatcher notifyWatcher(
+            _ctx, IN_NONBLOCK, IN_MOVED_TO, NOTIFY_SERVICES_DIR);
+
+        while (!_ctx.stop_requested())
+        {
+            if (auto dataOperations = co_await notifyWatcher.onDataChange();
+                !dataOperations.empty())
+            {
+                // TODO: add receiver logic if need to stop notifiactions
+                // when disable sync is set to true.
+                for (const auto& [path, Op] : dataOperations)
+                {
+                    notify::NotifyService notifyService(_ctx, *_extDataIfaces,
+                                                        path);
+                }
+            }
+        }
+    }
+    catch (std::exception& e)
+    {
+        // TODO : Create error log if fails to create watcher.
+        constexpr auto notifyDir{NOTIFY_SERVICES_DIR};
+        lg2::error("Failed to create watcher for {NOTIFY_DIR}. Exception : "
+                   "{EXCEP}",
+                   "NOTIFY_DIR", notifyDir, "EXCEP", e);
+    }
     co_return;
 }
 
@@ -470,9 +540,14 @@ sdbusplus::async::task<>
             eventMasksToWatch |= IN_CREATE | IN_DELETE;
         }
 
-        // Create watcher for the dataSyncCfg._path
-        watch::inotify::DataWatcher dataWatcher(_ctx, IN_NONBLOCK,
-                                                eventMasksToWatch, dataSyncCfg);
+        auto excludeList =
+            dataSyncCfg._excludeList.has_value()
+                ? std::make_optional<std::unordered_set<fs::path>>(
+                      dataSyncCfg._excludeList.value().first)
+                : std::nullopt;
+        watch::inotify::DataWatcher dataWatcher(
+            _ctx, IN_NONBLOCK, eventMasksToWatch, dataSyncCfg._path,
+            excludeList, dataSyncCfg._includeList);
 
         while (!_ctx.stop_requested() && !_syncBMCDataIface.disable_sync())
         {
