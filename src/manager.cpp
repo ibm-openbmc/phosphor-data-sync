@@ -520,10 +520,25 @@ sdbusplus::async::task<bool>
                     "RsyncCLI: [{RSYNC_CMD}]",
                     "PATH", currentSrcPath, "ERRCODE", result.first, "ERROR",
                     result.second, "RSYNC_CMD", syncCmd);
+                // Have additional details in the error log for permanent
+                // failures
+
+                _additionalDetails.clear();
+                _additionalDetails["BMC_Role"] = _extDataIfaces->bmcRoleInStr();
+                _additionalDetails["DS_Sync_Path"] = currentSrcPath;
+                _additionalDetails["DS_Sync_Direction"] =
+                    dataSyncCfg.getSyncDirectionInStr();
+                _additionalDetails["DS_Sync_Type"] =
+                    dataSyncCfg.getSyncTypeInStr();
+                _additionalDetails["DS_Sync_ErrCode"] =
+                    std::to_string(result.first);
+                _additionalDetails["DS_Sync_ErrMsg"] = result.second;
+                _additionalDetails["DS_Sync_Msg"] =
+                    "Permanent rsync failure occurred for the path";
 
                 co_await _extDataIfaces->createErrorLog(
                     "xyz.openbmc_project.RBMC_DataSync.Error.SyncFailure",
-                    ext_data::ErrorLevel::Warning, {});
+                    ext_data::ErrorLevel::Warning, _additionalDetails);
                 co_return false;
             }
 
@@ -610,10 +625,15 @@ sdbusplus::async::task<>
         "NOTIFYPATH", notifyPath, "MAX_ATTEMPTS", cfg._retry->_maxRetryAttempts,
         "MODIFIEDPATH", modifiedPath);
 
-    // TODO : Add additional info to the PEL
+    _additionalDetails.clear();
+    _additionalDetails["BMC_Role"] = _extDataIfaces->bmcRoleInStr();
+    _additionalDetails["DS_Notify_Path"] = notifyPath;
+    _additionalDetails["DS_Notify_ModifiedPath"] = modifiedPath;
+    _additionalDetails["DS_Notify_Msg"] =
+        "Failed to send notify request for the path";
     co_await _extDataIfaces->createErrorLog(
         "xyz.openbmc_project.RBMC_DataSync.Error.NotifyFailure",
-        ext_data::ErrorLevel::Informational, {});
+        ext_data::ErrorLevel::Informational, _additionalDetails);
 
     co_return;
 }

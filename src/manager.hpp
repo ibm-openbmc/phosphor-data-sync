@@ -325,6 +325,11 @@ class Manager
      *        completes.
      */
     std::vector<std::unique_ptr<notify::NotifyService>> _notifyReqs;
+
+    /**
+     * @brief To store additional data for error logging
+     */
+    ext_data::AdditionalData _additionalDetails;
 };
 
 } // namespace data_sync
