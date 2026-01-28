@@ -726,11 +726,20 @@ sdbusplus::async::task<>
     }
     catch (std::exception& e)
     {
-        // TODO : Create error log if fails to create watcher for a
-        // file/directory.
         lg2::error("Failed to create watcher object for {PATH}. Exception : "
                    "{ERROR}",
                    "PATH", dataSyncCfg._path, "ERROR", e.what());
+
+        ext_data::AdditionalData additionalDetails = {
+            {"DS_Sync_Path", dataSyncCfg._path.string()},
+            {"DS_Sync_ErrMsg", "Failed to create watcher for the path"}};
+        additionalDetails["DS_Sync_Type"] = dataSyncCfg.getSyncTypeInStr();
+        if (!_ctx.stop_requested())
+        {
+            _ctx.spawn(_extDataIfaces->createErrorLog(
+                "xyz.openbmc_project.RBMC_DataSync.Error.SyncEventsFailure",
+                ext_data::ErrorLevel::Warning, additionalDetails));
+        }
     }
     co_return;
 }
