@@ -106,10 +106,10 @@ class ExternalDataIFaces
      * @param[in] calloutsDetails - Optional callout details to be included in
      *                              the error log entry.
      */
-    virtual sdbusplus::async::task<> createErrorLog(
-        const std::string& errMsg, const ErrorLevel& errSeverity,
-        AdditionalData& additionalDetails,
-        const std::optional<json>& calloutsDetails = std::nullopt) = 0;
+    virtual sdbusplus::async::task<>
+        createErrorLog(std::string errMsg, ErrorLevel errSeverity,
+                       AdditionalData additionalDetails,
+                       std::optional<json> calloutsDetails = std::nullopt) = 0;
 
     /**
      * @brief Watch for the Redundancy manager properties.

@@ -601,11 +601,12 @@ TEST_F(ManagerTest, FullSyncFailed)
     // ASSERT_EQ(ManagerTest::readData(srcFile4), data4);
     ON_CALL(*mockExtDataIfaces,
             createErrorLog(testing::_, testing::_, testing::_, testing::_))
-        .WillByDefault([](const std::string&,
-                          const data_sync::ext_data::ErrorLevel&,
-                          data_sync::ext_data::AdditionalData&,
-                          const std::optional<nlohmann::json>&)
-                           -> sdbusplus::async::task<> { co_return; });
+        .WillByDefault(
+            [](std::string, data_sync::ext_data::ErrorLevel,
+               data_sync::ext_data::AdditionalData,
+               std::optional<nlohmann::json>) -> sdbusplus::async::task<> {
+        co_return;
+    });
     data_sync::Manager manager{ctx, std::move(extDataIface),
                                ManagerTest::dataSyncCfgDir};
 
