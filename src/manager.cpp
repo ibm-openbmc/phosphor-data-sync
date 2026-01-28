@@ -63,15 +63,16 @@ sdbusplus::async::task<> Manager::init()
     _ctx.spawn(_extDataIfaces->watchRedundancyMgrProps());
 #endif
 
-    // TODO: Explore the possibility of running FullSync and Background Sync
-    // concurrently
     if (_extDataIfaces->bmcRedundancy())
     {
-        // NOLINTNEXTLINE
+        // TODO: Explore the possibility of running FullSync and Background Sync
+        //       concurrently
         co_await startFullSync();
+
+        co_await startSyncEvents();
     }
 
-    co_return co_await startSyncEvents();
+    co_return;
 }
 
 // NOLINTNEXTLINE

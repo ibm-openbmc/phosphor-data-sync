@@ -18,9 +18,13 @@ TEST_F(ManagerTest, PeriodicDataSyncTest)
     ed::MockExternalDataIFaces* mockExtDataIfaces =
         dynamic_cast<ed::MockExternalDataIFaces*>(extDataIface.get());
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
+    ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
         // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+        .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
+        mockExtDataIfaces->setBMCRole(ed::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
+        co_return;
+    });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
         // NOLINTNEXTLINE
@@ -85,9 +89,13 @@ TEST_F(ManagerTest, PeriodicDataSyncDelayFileTest)
     ed::MockExternalDataIFaces* mockExtDataIfaces =
         dynamic_cast<ed::MockExternalDataIFaces*>(extDataIface.get());
 
-    EXPECT_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
+    ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
         // NOLINTNEXTLINE
-        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+        .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
+        mockExtDataIfaces->setBMCRole(ed::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
+        co_return;
+    });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
         // NOLINTNEXTLINE
@@ -153,6 +161,7 @@ TEST_F(ManagerTest, PeriodicDataSyncMultiRWTest)
         // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(ed::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
@@ -224,6 +233,7 @@ TEST_F(ManagerTest, PeriodicDataSyncP2ATest)
         // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(ed::BMCRole::Passive);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
@@ -283,6 +293,7 @@ TEST_F(ManagerTest, PeriodicDisablePropertyTest)
         // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(ed::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
@@ -351,6 +362,7 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteInDir)
         // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
@@ -428,6 +440,7 @@ TEST_F(ManagerTest, PeriodicDataSyncTestDataDeleteFile)
         // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 

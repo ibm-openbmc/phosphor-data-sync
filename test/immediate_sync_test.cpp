@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #include "data_watcher.hpp"
 #include "manager_test.hpp"
 
@@ -13,26 +15,26 @@ std::filesystem::path ManagerTest::tmpDataSyncDataDir;
 nlohmann::json ManagerTest::commonJsonData;
 std::filesystem::path ManagerTest::destDir;
 
+using FullSyncStatus = sdbusplus::common::xyz::openbmc_project::control::
+    SyncBMCData::FullSyncStatus;
+
 TEST_F(ManagerTest, testDataChangeInFile)
 {
     using namespace std::literals;
     namespace extData = data_sync::ext_data;
 
-    std::unique_ptr<extData::ExternalDataIFaces> extDataIface =
-        std::make_unique<extData::MockExternalDataIFaces>();
-
+    auto extDataIface = std::make_unique<extData::MockExternalDataIFaces>();
     extData::MockExternalDataIFaces* mockExtDataIfaces =
         dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
 
     ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
-        // NOLINTNEXTLINE
-        .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
+        .WillByDefault([mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
-        // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -48,11 +50,12 @@ TEST_F(ManagerTest, testDataChangeInFile)
     fs::path destPath = destDir / fs::relative(srcPath, "/");
 
     writeConfig(jsonData);
-    sdbusplus::async::context ctx;
+    auto ctx = std::make_shared<sdbusplus::async::context>();
 
     std::string data{"Src: Initial Data\n"};
     ManagerTest::writeData(srcPath, data);
     ASSERT_EQ(ManagerTest::readData(srcPath), data);
+
     // Create dest path for adding watch.
     std::string destData{"Dest: Initial Data\n"};
     fs::create_directories(destPath.parent_path());
@@ -60,41 +63,58 @@ TEST_F(ManagerTest, testDataChangeInFile)
     ManagerTest::writeData(destPath, destData);
     ASSERT_EQ(ManagerTest::readData(destPath), destData);
 
-    data_sync::Manager manager{ctx, std::move(extDataIface),
-                               ManagerTest::dataSyncCfgDir};
+    auto manager = std::make_shared<data_sync::Manager>(
+        *ctx, std::move(extDataIface), ManagerTest::dataSyncCfgDir);
 
-    std::string dataToWrite{"Data is modified"};
+    // Spawn the coroutine to trigger immediate sync and check the expectation
+    // at dest upon receiving events
+    auto triggerAndWatchSyncOp = [manager, srcPath, destPath,
+                                  ctx]() -> sdbusplus::async::task<void> {
+        // Wait for full sync to complete
+        auto status = manager->getFullSyncStatus();
+        while (status != FullSyncStatus::FullSyncCompleted &&
+               status != FullSyncStatus::FullSyncFailed)
+        {
+            status = manager->getFullSyncStatus();
+            co_await sdbusplus::async::sleep_for(*ctx,
+                                                 std::chrono::milliseconds(50));
+        }
 
-    // Watch for dest path data change
-    data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destPath);
-    ctx.spawn(
-        dataWatcher.onDataChange() |
-        sdbusplus::async::execution::then(
-            [&dataToWrite, &destPath]([[maybe_unused]] const auto& dataOps) {
-        EXPECT_EQ(dataToWrite, readData(destPath));
-    }));
+        // data to modify the file
+        std::string dataToWrite{"Data is modified"};
 
-    // NOLINTNEXTLINE
-    auto triggerImmediateSync = [&]() -> sdbusplus::async::task<void> {
-        // Write data after 1s so that the background sync events will be ready
-        // to catch.
-        co_await sdbusplus::async::sleep_for(ctx, std::chrono::seconds(1));
+        // Create DataWatcher(for dest path)
+        auto destWatcher =
+            std::make_shared<data_sync::watch::inotify::DataWatcher>(
+                *ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destPath);
 
-        ManagerTest::writeData(srcPath, dataToWrite);
-        EXPECT_EQ(dataToWrite, ManagerTest::readData(srcPath));
+        // Listen for data change in destination and assert in the 'then'
+        // handler
+        ctx->spawn(
+            destWatcher->onDataChange() |
+            sdbusplus::async::execution::then([srcPath, destPath, destWatcher,
+                                               dataToWrite, ctx](const auto&) {
+            EXPECT_EQ(dataToWrite, readData(destPath));
 
-        // Force an inotify event so running immediate sync tasks wake up
-        // handle the last write, and exit once the context stop is requested
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(100));
-        ManagerTest::writeData(srcPath, dataToWrite);
-        ctx.request_stop();
+            // Force an inotify event so running immediate sync tasks wake up
+            // handle the last write, and exit once the context stop is
+            // requested
+            ManagerTest::writeData(srcPath, "Dummy data to stop ctx");
+            ctx->request_stop();
+        }));
+
+        // Delay to finish the watcher setup and then write into the source
+        // file;
+        ctx->spawn(sdbusplus::async::sleep_for(*ctx, 1s) |
+                   sdbusplus::async::execution::then([srcPath, dataToWrite]() {
+            ManagerTest::writeData(srcPath, dataToWrite);
+            ASSERT_EQ(ManagerTest::readData(srcPath), dataToWrite);
+        }));
         co_return;
     };
 
-    ctx.spawn(triggerImmediateSync());
-    ctx.run();
+    ctx->spawn(triggerAndWatchSyncOp());
+    ctx->run();
 }
 
 TEST_F(ManagerTest, testDataDeleteInDir)
@@ -109,14 +129,13 @@ TEST_F(ManagerTest, testDataDeleteInDir)
         dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
 
     ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
-        // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
-        // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -131,11 +150,12 @@ TEST_F(ManagerTest, testDataDeleteInDir)
     fs::path destDir{jsonData["Directories"][0]["DestinationPath"]};
 
     writeConfig(jsonData);
-    sdbusplus::async::context ctx;
+    auto ctx = std::make_shared<sdbusplus::async::context>();
 
     std::string data{"Src: Initial Data\n"};
     fs::create_directory(srcDir);
     fs::path srcDirFile = srcDir / "Test";
+
     // Write data at the src side.
     ManagerTest::writeData(srcDirFile, data);
     ASSERT_EQ(ManagerTest::readData(srcDirFile), data);
@@ -145,46 +165,60 @@ TEST_F(ManagerTest, testDataDeleteInDir)
     fs::path destDirFile = destDir / fs::relative(srcDir, "/") / "Test";
     fs::create_directories(destDirFile.parent_path());
     ASSERT_TRUE(fs::exists(destDirFile.parent_path()));
+
     // Write data at dest side
     ManagerTest::writeData(destDirFile, destData);
     ASSERT_EQ(ManagerTest::readData(destDirFile), destData);
 
-    data_sync::Manager manager{ctx, std::move(extDataIface),
-                               ManagerTest::dataSyncCfgDir};
+    auto manager = std::make_shared<data_sync::Manager>(
+        *ctx, std::move(extDataIface), ManagerTest::dataSyncCfgDir);
 
-    // Watch for dest path data change
-    data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_DELETE, destDirFile.parent_path());
-    ctx.spawn(dataWatcher.onDataChange() |
-              sdbusplus::async::execution::then(
-                  [&destDirFile]([[maybe_unused]] const auto& dataOps) {
-        // the file should not exists
-        EXPECT_FALSE(std::filesystem::exists(destDirFile));
-    }));
+    // Spawn the coroutines to trigger immediate sync and check the expectation
+    // at dest upon receiving events
+    auto triggerAndWatchSyncOp = [manager, srcDirFile, destDirFile,
+                                  ctx]() -> sdbusplus::async::task<void> {
+        // Wait until full sync completes and then start watch destination for
+        // inotify events
+        auto status = manager->getFullSyncStatus();
+        while (status != FullSyncStatus::FullSyncCompleted &&
+               status != FullSyncStatus::FullSyncFailed)
+        {
+            status = manager->getFullSyncStatus();
+            co_await sdbusplus::async::sleep_for(*ctx,
+                                                 std::chrono::milliseconds(50));
+        }
 
-    // NOLINTNEXTLINE
-    auto triggerImmediateSync = [&]() -> sdbusplus::async::task<void> {
-        // Remove file after 1s so that the background sync events will be ready
-        // to catch.
-        co_await sdbusplus::async::sleep_for(ctx, std::chrono::seconds(1));
+        // Create DataWatcher(inotify watcher) for dest path
+        auto destWatcher =
+            std::make_shared<data_sync::watch::inotify::DataWatcher>(
+                *ctx, IN_NONBLOCK, IN_DELETE, destDirFile.parent_path());
 
-        // remove the file from srcDir
-        std::filesystem::remove(srcDirFile);
-        // check if it exists  srcDirFile
-        EXPECT_FALSE(std::filesystem::exists(srcDirFile));
+        // Listen for change and assert in 'then' handler; capture by-value
+        ctx->spawn(
+            destWatcher->onDataChange() |
+            sdbusplus::async::execution::then(
+                [srcDirFile, destWatcher, destDirFile, ctx](const auto&) {
+            // the file should not exists at dest.
+            EXPECT_FALSE(std::filesystem::exists(destDirFile));
 
-        // Force an inotify event so running immediate sync tasks wake up
-        // handle the last write, and exit once the context stop is requested
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(100));
-        ManagerTest::writeData(srcDirFile, "data");
+            // Force an inotify event so the running immediate sync tasks wake
+            // up and handle the last write, and exit as the context stop is
+            // also requested
+            ManagerTest::writeData(srcDirFile, "dummy data");
+            ctx->request_stop();
+        }));
 
-        ctx.request_stop();
+        // Delay to finish the watcher setup and then delete the source file
+        ctx->spawn(sdbusplus::async::sleep_for(*ctx, 1s) |
+                   sdbusplus::async::execution::then([srcDirFile]() {
+            std::filesystem::remove(srcDirFile);
+            ASSERT_FALSE(std::filesystem::exists(srcDirFile));
+        }));
         co_return;
     };
 
-    ctx.spawn(triggerImmediateSync());
-    ctx.run();
+    ctx->spawn(triggerAndWatchSyncOp());
+    ctx->run();
 }
 
 TEST_F(ManagerTest, testDataDeletePathFile)
@@ -199,14 +233,13 @@ TEST_F(ManagerTest, testDataDeletePathFile)
         dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
 
     ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
-        // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
-        // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -223,7 +256,7 @@ TEST_F(ManagerTest, testDataDeletePathFile)
     fs::path destPath = destDir / fs::relative(srcPath, "/");
 
     writeConfig(jsonData);
-    sdbusplus::async::context ctx;
+    auto ctx = std::make_shared<sdbusplus::async::context>();
 
     // Create directories in source
     fs::create_directory(ManagerTest::tmpDataSyncDataDir / "srcDir");
@@ -239,41 +272,53 @@ TEST_F(ManagerTest, testDataDeletePathFile)
     ManagerTest::writeData(destPath, destData);
     ASSERT_EQ(ManagerTest::readData(destPath), destData);
 
-    data_sync::Manager manager{ctx, std::move(extDataIface),
-                               ManagerTest::dataSyncCfgDir};
+    auto manager = std::make_shared<data_sync::Manager>(
+        *ctx, std::move(extDataIface), ManagerTest::dataSyncCfgDir);
 
-    // Watch for dest path data change
-    data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_DELETE_SELF, destPath);
-    ctx.spawn(dataWatcher.onDataChange() |
-              sdbusplus::async::execution::then(
-                  [&destPath]([[maybe_unused]] const auto& dataOps) {
-        EXPECT_FALSE(std::filesystem::exists(destPath));
-    }));
+    // Spawn the coroutines to trigger immediate sync and check the expectation
+    // at dest upon receiving events
+    auto triggerAndWatchSyncOp = [manager, srcPath, destPath,
+                                  ctx]() -> sdbusplus::async::task<void> {
+        // Wait for full sync to complete
+        auto status = manager->getFullSyncStatus();
+        while (status != FullSyncStatus::FullSyncCompleted &&
+               status != FullSyncStatus::FullSyncFailed)
+        {
+            status = manager->getFullSyncStatus();
+            co_await sdbusplus::async::sleep_for(*ctx,
+                                                 std::chrono::milliseconds(50));
+        }
 
-    // NOLINTNEXTLINE
-    auto triggerImmediateSync = [&]() -> sdbusplus::async::task<void> {
-        // Remove file after 1s so that the background sync events will be ready
-        // to catch.
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(10));
+        // Create DataWatcher(for dest path)
+        auto destWatcher =
+            std::make_shared<data_sync::watch::inotify::DataWatcher>(
+                *ctx, IN_NONBLOCK, IN_DELETE_SELF, destPath);
 
-        // remove the file
-        std::filesystem::remove(srcPath);
-        EXPECT_FALSE(std::filesystem::exists(srcPath));
+        // Listen for change and assert in the 'then' handler;
+        ctx->spawn(destWatcher->onDataChange() |
+                   sdbusplus::async::execution::then(
+                       [srcPath, destPath, destWatcher, ctx](const auto&) {
+            // the file should not exists at dest.
+            EXPECT_FALSE(std::filesystem::exists(destPath));
 
-        // Force an inotify event so running immediate sync tasks wake up
-        // handle the last write, and exit once the context stop is requested
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(100));
-        ManagerTest::writeData(srcPath, "data");
+            // Force an inotify event so running immediate sync tasks wake up
+            // handle the last write, and exit once the context stop is
+            // requested
+            ManagerTest::writeData(srcPath, "dummy data to stop ctx");
+            ctx->request_stop();
+        }));
 
-        ctx.request_stop();
+        // Delay and then delete the source file;
+        ctx->spawn(sdbusplus::async::sleep_for(*ctx, 1s) |
+                   sdbusplus::async::execution::then([srcPath]() {
+            std::filesystem::remove(srcPath);
+            ASSERT_FALSE(std::filesystem::exists(srcPath));
+        }));
         co_return;
     };
 
-    ctx.spawn(triggerImmediateSync());
-    ctx.run();
+    ctx->spawn(triggerAndWatchSyncOp());
+    ctx->run();
 }
 
 /*
@@ -296,14 +341,13 @@ TEST_F(ManagerTest, testDataChangeWhenSyncIsDisabled)
         dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
 
     ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
-        // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
-        // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -399,14 +443,13 @@ TEST_F(ManagerTest, testDataCreateInSubDir)
         dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
 
     ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
-        // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
-        // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -426,48 +469,58 @@ TEST_F(ManagerTest, testDataCreateInSubDir)
     std::filesystem::create_directory(destDir);
 
     writeConfig(jsonData);
-    sdbusplus::async::context ctx;
+    auto ctx = std::make_shared<sdbusplus::async::context>();
 
-    data_sync::Manager manager{ctx, std::move(extDataIface),
-                               ManagerTest::dataSyncCfgDir};
+    auto manager = std::make_shared<data_sync::Manager>(
+        *ctx, std::move(extDataIface), ManagerTest::dataSyncCfgDir);
 
-    // Watch for dest path data change
-    data_sync::watch::inotify::DataWatcher dataWatcher(ctx, IN_NONBLOCK,
-                                                       IN_CREATE, destDir);
-    // NOLINTNEXTLINE
-    auto waitForDataChange = [&]() -> sdbusplus::async::task<void> {
-        // NOLINTNEXTLINE
-        co_await dataWatcher.onDataChange();
-        fs::path destSubDir = destDir / fs::relative(srcDir, "/") / "Test";
-        // sleep to get sync and refelet in the dest
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(10));
-        EXPECT_TRUE(std::filesystem::exists(destSubDir));
+    // Spawn the coroutine to trigger immediate sync and check the expectation
+    // at dest upon receiving events
+    auto triggerAndWatchSyncOp = [manager, srcDir, destDir,
+                                  ctx]() -> sdbusplus::async::task<void> {
+        // Wait for full sync to complete
+        auto status = manager->getFullSyncStatus();
+        while (status != FullSyncStatus::FullSyncCompleted &&
+               status != FullSyncStatus::FullSyncFailed)
+        {
+            status = manager->getFullSyncStatus();
+            co_await sdbusplus::async::sleep_for(*ctx,
+                                                 std::chrono::milliseconds(50));
+        }
 
-        co_return;
-    };
+        // Create DataWatcher(for dest path)
+        auto destWatcher =
+            std::make_shared<data_sync::watch::inotify::DataWatcher>(
+                *ctx, IN_NONBLOCK, IN_CREATE, destDir);
 
-    // NOLINTNEXTLINE
-    auto triggerImmediateSync = [&]() -> sdbusplus::async::task<void> {
+        // Listen for change and assert in the 'then' handler; capture by-value
+        ctx->spawn(destWatcher->onDataChange() |
+                   sdbusplus::async::execution::then(
+                       [srcDir, destDir, destWatcher, ctx](const auto&) {
+            fs::path destSubDir = destDir / fs::relative(srcDir, "/") / "Test";
+            // sleep to get sync and refelet in the dest
+            sdbusplus::async::sleep_for(*ctx, std::chrono::milliseconds(10));
+            EXPECT_TRUE(std::filesystem::exists(destSubDir));
+
+            // Force an inotify event so running immediate sync tasks wake up
+            // handle the last write, and exit once the context stop is
+            // requested
+            std::filesystem::create_directory(srcDir / "data");
+            ctx->request_stop();
+        }));
+
         // Write data after 1s so that the background sync events will be ready
         // to catch.
-        co_await sdbusplus::async::sleep_for(ctx, std::chrono::seconds(1));
-        std::filesystem::create_directory(srcDir / "Test");
-        EXPECT_TRUE(std::filesystem::exists(srcDir / "Test"));
-
-        // Force an inotify event so running immediate sync tasks wake up
-        // handle the last write, and exit once the context stop is requested
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(100));
-        std::filesystem::create_directory(srcDir / "data");
-        ctx.request_stop();
+        ctx->spawn(sdbusplus::async::sleep_for(*ctx, 1s) |
+                   sdbusplus::async::execution::then([srcDir]() {
+            std::filesystem::create_directory(srcDir / "Test");
+            ASSERT_TRUE(std::filesystem::exists(srcDir / "Test"));
+        }));
         co_return;
     };
 
-    ctx.spawn(triggerImmediateSync());
-    ctx.spawn(waitForDataChange());
-
-    ctx.run();
+    ctx->spawn(triggerAndWatchSyncOp());
+    ctx->run();
 }
 
 TEST_F(ManagerTest, testFileMoveToAnotherDir)
@@ -482,14 +535,13 @@ TEST_F(ManagerTest, testFileMoveToAnotherDir)
         dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
 
     ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
-        // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
-        // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -602,6 +654,7 @@ TEST_F(ManagerTest, testExcludeFile)
         // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
 
@@ -630,9 +683,9 @@ TEST_F(ManagerTest, testExcludeFile)
     std::filesystem::create_directory(destDir);
 
     writeConfig(jsonData);
-    sdbusplus::async::context ctx;
+    auto ctx = std::make_shared<sdbusplus::async::context>();
 
-    // Create 2 files inside srcDir
+    // Data for 2 files inside srcDir
     std::string data1{"Data written to file1"};
     std::string dataExcludeFile{"Data written to excludeFile"};
 
@@ -642,62 +695,70 @@ TEST_F(ManagerTest, testExcludeFile)
     ManagerTest::writeData(excludeFile, dataExcludeFile);
     ASSERT_EQ(ManagerTest::readData(excludeFile), dataExcludeFile);
 
-    // Watch dest path for data change
-    data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_CREATE | IN_CLOSE_WRITE, destDir);
-
-    data_sync::Manager manager{ctx, std::move(extDataIface),
-                               ManagerTest::dataSyncCfgDir};
+    auto manager = std::make_shared<data_sync::Manager>(
+        *ctx, std::move(extDataIface), ManagerTest::dataSyncCfgDir);
 
     std::string dataToFile1{"Data modified in file1"};
     std::string dataToExcludeFile{"Data modified in ExcludeFile"};
 
-    // NOLINTNEXTLINE
-    auto waitForDataChange = [&]() -> sdbusplus::async::task<void> {
-        using namespace std::chrono_literals;
-        // NOLINTNEXTLINE
-        co_await dataWatcher.onDataChange();
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(10));
-        EXPECT_TRUE(fs::exists(destDir / fs::relative(file1, "/")));
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(10));
-        EXPECT_EQ(ManagerTest::readData(destDir / fs::relative(file1, "/")),
-                  dataToFile1)
-            << "Data in file1 should modified at dest side";
-        EXPECT_FALSE(fs::exists(destDir / fs::relative(excludeFile, "/")))
-            << "fileX should excluded while syncing to the dest side";
+    // Spawn the coroutine to trigger immediate sync and check the expectation
+    // at dest upon receiving events
+    auto triggerAndWatchSyncOp = [manager, srcDir, destDir, file1, excludeFile,
+                                  dataToFile1, dataToExcludeFile,
+                                  ctx]() -> sdbusplus::async::task<void> {
+        // Wait for full sync to complete
+        auto status = manager->getFullSyncStatus();
+        while (status != FullSyncStatus::FullSyncCompleted &&
+               status != FullSyncStatus::FullSyncFailed)
+        {
+            status = manager->getFullSyncStatus();
+            co_await sdbusplus::async::sleep_for(*ctx,
+                                                 std::chrono::milliseconds(50));
+        }
 
+        // Create DataWatcher(for dest path)
+        auto destWatcher =
+            std::make_shared<data_sync::watch::inotify::DataWatcher>(
+                *ctx, IN_NONBLOCK, IN_CREATE | IN_CLOSE_WRITE, destDir);
+
+        // Listen for change and assert in the 'then' handler; capture by-value
+        ctx->spawn(destWatcher->onDataChange() |
+                   sdbusplus::async::execution::then(
+                       [destDir, file1, excludeFile, dataToFile1,
+                        dataToExcludeFile, destWatcher, ctx](const auto&) {
+            sdbusplus::async::sleep_for(*ctx, std::chrono::milliseconds(20));
+
+            EXPECT_TRUE(fs::exists(destDir / fs::relative(file1, "/")))
+                << "file1 should be present at the dest side";
+            EXPECT_FALSE(fs::exists(destDir / fs::relative(excludeFile, "/")))
+                << "fileX should excluded while syncing to the dest side";
+
+            // Force an inotify event so running immediate sync tasks wake up
+            // handle the last write, and exit once the context stop is
+            // requested
+            ManagerTest::writeData(file1, "dummy data to stop ctx");
+            ctx->request_stop();
+        }));
+
+        ctx->spawn(
+            sdbusplus::async::sleep_for(*ctx, 1s) |
+            sdbusplus::async::execution::then(
+                [file1, excludeFile, dataToFile1, dataToExcludeFile, ctx]() {
+            // Write to file after 1s so that the background sync events will be
+            // ready to catch.
+            sdbusplus::async::sleep_for(*ctx, std::chrono::seconds(1));
+
+            ManagerTest::writeData(excludeFile, dataToExcludeFile);
+            EXPECT_EQ(ManagerTest::readData(excludeFile), dataToExcludeFile);
+
+            ManagerTest::writeData(file1, dataToFile1);
+            EXPECT_EQ(ManagerTest::readData(file1), dataToFile1);
+        }));
         co_return;
     };
 
-    // NOLINTNEXTLINE
-    auto triggerImmediateSync = [&]() -> sdbusplus::async::task<void> {
-        // Move file after 1s so that the background sync events will be ready
-        // to catch.
-        // NOLINTNEXTLINE
-        co_await sdbusplus::async::sleep_for(ctx, std::chrono::seconds(1));
-
-        ManagerTest::writeData(excludeFile, dataToExcludeFile);
-
-        EXPECT_EQ(ManagerTest::readData(excludeFile), dataToExcludeFile);
-        ManagerTest::writeData(file1, dataToFile1);
-        EXPECT_EQ(ManagerTest::readData(file1), dataToFile1);
-
-        // Force an inotify event so running immediate sync tasks wake up
-        // handle the last write, and exit once the context stop is requested
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(100));
-        ManagerTest::writeData(file1, dataToFile1);
-
-        ctx.request_stop();
-        co_return;
-    };
-
-    ctx.spawn(waitForDataChange());
-    ctx.spawn(triggerImmediateSync());
-
-    ctx.run();
+    ctx->spawn(triggerAndWatchSyncOp());
+    ctx->run();
 }
 
 TEST_F(ManagerTest, ImmediateSyncVanishedPathRetrySucceeds)
@@ -711,13 +772,12 @@ TEST_F(ManagerTest, ImmediateSyncVanishedPathRetrySucceeds)
         dynamic_cast<extData::MockExternalDataIFaces*>(extDataIface.get());
 
     ON_CALL(*mockExtDataIfaces, fetchBMCRedundancyMgrProps())
-        // NOLINTNEXTLINE
         .WillByDefault([&mockExtDataIfaces]() -> sdbusplus::async::task<> {
         mockExtDataIfaces->setBMCRole(extData::BMCRole::Active);
+        mockExtDataIfaces->setBMCRedundancy(true);
         co_return;
     });
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
-        // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -741,92 +801,84 @@ TEST_F(ManagerTest, ImmediateSyncVanishedPathRetrySucceeds)
     const fs::path destFilePath = destRoot / fs::relative(srcPath, "/");
     const fs::path destFilePath2 = destRoot / fs::relative(srcSubDirPath, "/");
 
-    // Watch the dest file for IN_CLOSE_WRITE (retry completion)
-    data_sync::config::DataSyncConfig dataSyncCfg([&]() {
-        nlohmann::json j = jsonData["Files"][0];
-        j["Path"] = destFilePath2.string();
-        return j;
-    }(), true);
-
     writeConfig(jsonData);
-    sdbusplus::async::context ctx;
+    auto ctx = std::make_shared<sdbusplus::async::context>();
 
     std::filesystem::create_directories(srcPath);
     std::filesystem::create_directories(srcSubDirPath);
     std::filesystem::create_directories(destRoot);
 
-    data_sync::Manager manager{ctx, std::move(extDataIface),
-                               ManagerTest::dataSyncCfgDir};
+    auto manager = std::make_shared<data_sync::Manager>(
+        *ctx, std::move(extDataIface), ManagerTest::dataSyncCfgDir);
 
-    const std::string data{"sample data \n"};
+    // Spawn the coroutine to trigger immediate sync
+    // and check the expectation at dest upon receiving events
+    auto triggerAndWatchSyncOp = [manager, srcFilePath, srcSubFIlePath,
+                                  srcSubDirPath, destFilePath, destFilePath2,
+                                  ctx]() -> sdbusplus::async::task<void> {
+        // Wait for full sync to complete
+        auto status = manager->getFullSyncStatus();
+        while (status != FullSyncStatus::FullSyncCompleted &&
+               status != FullSyncStatus::FullSyncFailed)
+        {
+            status = manager->getFullSyncStatus();
+            co_await sdbusplus::async::sleep_for(*ctx,
+                                                 std::chrono::milliseconds(50));
+        }
 
-    data_sync::watch::inotify::DataWatcher dataWatcher(
-        ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destFilePath2);
+        // Create DataWatcher(for dest path)
+        auto destWatcher =
+            std::make_shared<data_sync::watch::inotify::DataWatcher>(
+                *ctx, IN_NONBLOCK, IN_CLOSE_WRITE, destFilePath2);
 
-    auto waitForDataChange =
-        // NOLINTNEXTLINE
-        [&](sdbusplus::async::context& ctx) -> sdbusplus::async::task<void> {
-        // NOLINTNEXTLINE
-        co_await dataWatcher.onDataChange();
-        // NOLINTNEXTLINE
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(30));
+        // Listen for change and assert in the 'then' handler; capture by-value
+        ctx->spawn(
+            destWatcher->onDataChange() |
+            sdbusplus::async::execution::then(
+                [destWatcher, srcSubFIlePath, destFilePath2, ctx](const auto&) {
+            // waiting here, so rync will be finished with parent path
+            sdbusplus::async::sleep_for(*ctx, std::chrono::milliseconds(10));
 
-        ctx.request_stop();
+            EXPECT_FALSE(std::filesystem::exists(destFilePath2))
+                << "Destination of removed subdir must not exist (we retried only the parent)";
+
+            // Force an inotify event so running immediate sync tasks wake up
+            // handle the last write, and exit once the context stop is
+            // requested
+            ManagerTest::writeData(srcSubFIlePath, "dummy data to stop ctx");
+            ctx->request_stop();
+        }));
+
+        // Delay to finish watcher setup and then update the source file
+        ctx->spawn(sdbusplus::async::sleep_for(*ctx, 1s) |
+                   sdbusplus::async::execution::then(
+                       [ctx, srcFilePath, srcSubDirPath]() {
+            // immediate sync retry test
+            // 1) write the file to trigger inotify
+            // 2) wait a few ms
+            // 3) delete the parent so the file vanishes (exit 24)
+            // 4) retry should pick the nearest valid parent and do the sync
+            const std::string data{"sample data \n"};
+            ManagerTest::writeData(srcFilePath, data);
+
+            EXPECT_TRUE(std::filesystem::exists(srcFilePath))
+                << "src file(srcFilePath) must exist before we delete its parent";
+
+            sdbusplus::async::sleep_for(*ctx, std::chrono::milliseconds(2));
+
+            std::error_code ec;
+            // deleteing the files/dir so it will trigger the rsync error
+            std::filesystem::remove_all(srcSubDirPath, ec);
+
+            EXPECT_FALSE(std::filesystem::exists(srcSubDirPath))
+                << "srcSubDirPath should be gone after remove all";
+
+            EXPECT_FALSE(std::filesystem::exists(srcFilePath))
+                << "srcFilePath should be gone because its parent was removed";
+        }));
         co_return;
     };
 
-    auto triggerImmediateSync =
-        // NOLINTNEXTLINE
-        [&](sdbusplus::async::context& ctx) -> sdbusplus::async::task<void> {
-        // NOLINTNEXTLINE
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(10));
-
-        // immediate sync retry test
-        // 1) write the file to trigger inotify
-        // 2) wait a few ms
-        // 3) delete the parent so the file vanishes (exit 24)
-        // 4) retry should pick the nearest valid parent and do the sync
-        ManagerTest::writeData(srcFilePath, data);
-
-        EXPECT_TRUE(std::filesystem::exists(srcFilePath))
-            << "src file(srcFilePath) must exist before we delete its parent";
-
-        co_await sdbusplus::async::sleep_for(ctx, std::chrono::milliseconds(2));
-
-        std::error_code ec;
-
-        // deleteing the files/dir so it will trigger the rsync error
-        std::filesystem::remove_all(srcSubDirPath, ec);
-
-        EXPECT_FALSE(std::filesystem::exists(srcSubDirPath))
-            << "srcSubDirPath should be gone after remove all";
-
-        EXPECT_FALSE(std::filesystem::exists(srcFilePath))
-            << "srcFilePath should be gone because its parent was removed";
-
-        // waiting here, so rync will be finished with parent path
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(100));
-
-        EXPECT_TRUE(std::filesystem::exists(destFilePath))
-            << "Destination mirror of 'srcDir' should exist (parent path synced on retry)";
-
-        EXPECT_FALSE(std::filesystem::exists(destFilePath2))
-            << "Destination of removed subdir must not exist (we retried only the parent)";
-
-        // Force an inotify event so running immediate sync tasks wake up
-        // handle the last write, and exit once the context stop is requested
-        co_await sdbusplus::async::sleep_for(ctx,
-                                             std::chrono::milliseconds(100));
-        ManagerTest::writeData(srcSubFIlePath, data);
-        ctx.request_stop();
-        co_return;
-    };
-
-    ctx.spawn(waitForDataChange(ctx));
-    ctx.spawn(triggerImmediateSync(ctx));
-
-    ctx.run();
+    ctx->spawn(triggerAndWatchSyncOp());
+    ctx->run();
 }
