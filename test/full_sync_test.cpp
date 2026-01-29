@@ -43,6 +43,10 @@ TEST_F(ManagerTest, FullSyncA2PTest)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile1"},
@@ -211,6 +215,10 @@ TEST_F(ManagerTest, FullSyncP2ATest)
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
         // NOLINTNEXTLINE
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -680,6 +688,10 @@ TEST_F(ManagerTest, FullSyncA2PWithExcludeDirTest)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile1"},
@@ -815,6 +827,10 @@ TEST_F(ManagerTest, FullSyncA2PWithExcludeFileTest)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile1"},
@@ -938,6 +954,10 @@ TEST_F(ManagerTest, FullSyncA2PWithIncludeListsTest)
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
         // NOLINTNEXTLINE
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
