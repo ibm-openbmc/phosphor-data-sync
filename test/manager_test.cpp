@@ -100,6 +100,10 @@ TEST_F(ManagerTest, testDBusDataPersistency)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    ON_CALL(*mockExtDataIfaces,
+            createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillByDefault([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {

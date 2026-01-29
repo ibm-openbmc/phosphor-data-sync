@@ -37,6 +37,10 @@ TEST_F(ManagerTest, testDataChangeInFile)
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile"},
@@ -136,6 +140,10 @@ TEST_F(ManagerTest, testDataDeleteInDir)
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -240,6 +248,10 @@ TEST_F(ManagerTest, testDataDeletePathFile)
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -350,6 +362,10 @@ TEST_F(ManagerTest, testDataChangeWhenSyncIsDisabled)
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile2"},
@@ -452,6 +468,10 @@ TEST_F(ManagerTest, testDataCreateInSubDir)
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Directories",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/"},
@@ -542,6 +562,10 @@ TEST_F(ManagerTest, testFileMoveToAnotherDir)
     });
 
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {
@@ -662,6 +686,10 @@ TEST_F(ManagerTest, testExcludeFile)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Directories",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcDir/"},
@@ -778,6 +806,10 @@ TEST_F(ManagerTest, ImmediateSyncVanishedPathRetrySucceeds)
         co_return;
     });
     EXPECT_CALL(*mockExtDataIfaces, fetchBMCPosition())
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
     nlohmann::json jsonData = {

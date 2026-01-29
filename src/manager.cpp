@@ -710,6 +710,7 @@ sdbusplus::async::task<>
     // NOLINTNEXTLINE
     Manager::monitorDataToSync(const config::DataSyncConfig& dataSyncCfg)
 {
+    bool exception{false};
     try
     {
         uint32_t eventMasksToWatch = IN_CLOSE_WRITE | IN_MOVE | IN_DELETE_SELF;
@@ -745,11 +746,20 @@ sdbusplus::async::task<>
     }
     catch (std::exception& e)
     {
-        // TODO : Create error log if fails to create watcher for a
-        // file/directory.
         lg2::error("Failed to create watcher object for {PATH}. Exception : "
                    "{ERROR}",
                    "PATH", dataSyncCfg._path, "ERROR", e.what());
+        exception = true;
+    }
+    if (exception)
+    {
+        ext_data::AdditionalData additionalDetails = {
+            {"DS_Events_Path", dataSyncCfg._path.string()},
+            {"DS_Events_Msg",
+             "Exception: Failed to create inotify watcher for the configured path"}};
+        co_await _extDataIfaces->createErrorLog(
+            "xyz.openbmc_project.RBMC_DataSync.Error.SyncEventsFailure",
+            ext_data::ErrorLevel::Warning, additionalDetails);
     }
     co_return;
 }
