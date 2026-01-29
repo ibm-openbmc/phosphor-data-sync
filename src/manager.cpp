@@ -78,7 +78,8 @@ sdbusplus::async::task<> Manager::init()
 // NOLINTNEXTLINE
 sdbusplus::async::task<> Manager::parseConfiguration()
 {
-    auto parse = [this](const auto& configFile) {
+    auto parse = [this](const auto& configFile) -> sdbusplus::async::task<> {
+        bool exception{false};
         try
         {
             std::ifstream file;
@@ -111,19 +112,27 @@ sdbusplus::async::task<> Manager::parseConfiguration()
                        " exception : {EXCEPTION}",
                        "CONFIG_FILE", configFile.path(), "EXCEPTION", e);
 
-            ext_data::AdditionalData additionalDetails = {
-                {"DS_Config_File", configFile.path().string()},
-                {"DS_Parser_Msg",
-                 "Failed to parse the data sync configuration"}};
-            _ctx.spawn(_extDataIfaces->createErrorLog(
-                "xyz.openbmc_project.RBMC_DataSync.Error.ParseFailure",
-                ext_data::ErrorLevel::Warning, additionalDetails));
+            exception = true;
         }
+        if (exception)
+        {
+            ext_data::AdditionalData additionalDetails = {
+                {"DS_Parser_Msg",
+                 "Exception: Failed to parse the data sync configuration"}};
+            additionalDetails["DS_Config_File"] = configFile.path();
+            co_await _extDataIfaces->createErrorLog(
+                "xyz.openbmc_project.RBMC_DataSync.Error.ParserFailure",
+                ext_data::ErrorLevel::Warning, additionalDetails);
+        }
+        co_return;
     };
 
     if (fs::exists(_dataSyncCfgDir) && fs::is_directory(_dataSyncCfgDir))
     {
-        std::ranges::for_each(fs::directory_iterator(_dataSyncCfgDir), parse);
+        for (const auto& entry : fs::directory_iterator(_dataSyncCfgDir))
+        {
+            co_await parse(entry);
+        }
     }
 
     co_return;
@@ -155,6 +164,8 @@ sdbusplus::async::task<> Manager::monitorServiceNotifications()
 {
     lg2::debug("Starting monitoring for sibling notifications...");
 
+    constexpr auto notifyDir{NOTIFY_SERVICES_DIR};
+    bool exception{false};
     try
     {
         _ctx.spawn(processPendingNotifications());
@@ -164,7 +175,6 @@ sdbusplus::async::task<> Manager::monitorServiceNotifications()
         // the destination and then rename to original file.
         watch::inotify::DataWatcher notifyWatcher(
             _ctx, IN_NONBLOCK, IN_MOVED_TO, NOTIFY_SERVICES_DIR);
-
         while (!_ctx.stop_requested())
         {
             if (auto dataOperations = co_await notifyWatcher.onDataChange();
@@ -186,18 +196,20 @@ sdbusplus::async::task<> Manager::monitorServiceNotifications()
     }
     catch (std::exception& e)
     {
-        constexpr auto notifyDir{NOTIFY_SERVICES_DIR};
         lg2::error("Failed to create watcher for {NOTIFY_DIR}. Exception : "
                    "{EXCEP}",
                    "NOTIFY_DIR", notifyDir, "EXCEP", e);
-
+        exception = true;
+    }
+    if (exception)
+    {
         ext_data::AdditionalData additionalDetails = {
             {"DS_Notify_DIR", notifyDir},
             {"DS_Notify_Msg",
-             "Failed to create inotify watcher for notify services directory"}};
-        _ctx.spawn(_extDataIfaces->createErrorLog(
+             "Exception: Failed to create inotify watcher for notify services directory"}};
+        co_await _extDataIfaces->createErrorLog(
             "xyz.openbmc_project.RBMC_DataSync.Error.NotifyFailure",
-            ext_data::ErrorLevel::Informational, additionalDetails));
+            ext_data::ErrorLevel::Informational, additionalDetails);
     }
     co_return;
 }
@@ -399,6 +411,8 @@ sdbusplus::async::task<void>
         }
     }
 
+    bool exception{false};
+
     try
     {
         // initiate sibling notification
@@ -413,13 +427,17 @@ sdbusplus::async::task<void>
             "[{SRCPATH}], Error : {ERR}",
             "SRCPATH", srcPath, "ERR", e);
 
+        exception = true;
+    }
+    if (exception)
+    {
         ext_data::AdditionalData additionalDetails = {
             {"DS_Notify_ModifiedPath", srcPath},
             {"DS_Notify_Msg",
-             "Failed to trigger sibling notification request for the path"}};
-        _ctx.spawn(_extDataIfaces->createErrorLog(
+             "Exception: Failed to trigger sibling notification request for the path"}};
+        co_await _extDataIfaces->createErrorLog(
             "xyz.openbmc_project.RBMC_DataSync.Error.NotifyFailure",
-            ext_data::ErrorLevel::Informational, additionalDetails));
+            ext_data::ErrorLevel::Informational, additionalDetails);
     }
 
     co_return;
