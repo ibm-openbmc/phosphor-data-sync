@@ -541,7 +541,7 @@ sdbusplus::async::task<bool>
             // Notify only if configured, we know the concrete path,
             // and bytes > 0
             if (dataSyncCfg._notifySibling &&
-                utility::rsync::getTransferredBytes(result.second) != 0)
+                utility::rsync::getTransferredDataBytes(result.second) != 0)
             {
                 // Rsync success alone doesn’t guarantee data got updated on the
                 // remote.
@@ -812,6 +812,12 @@ void Manager::setFullSyncStatus(const FullSyncStatus& fullSyncStatus)
         return;
     }
     _syncBMCDataIface.full_sync_status(fullSyncStatus);
+
+    // Don't persist InProgress status as it's a transient state
+    if (fullSyncStatus == FullSyncStatus::FullSyncInProgress)
+    {
+        return;
+    }
 
     try
     {
