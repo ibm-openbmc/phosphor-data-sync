@@ -20,9 +20,9 @@ shift 3 # Sync socket configuration files base name and $@ will be used in below
 RSYNC_TEMPLATE="$IN_CFG_DIR/rsyncd.conf.in"
 STUNNEL_TEMPLATE="$IN_CFG_DIR/stunnel.conf.in"
 
-CERT_DIR="/etc/phosphor-data-sync/certs"
-RSYNC_OUT_DIR="$OUT_CFG_DIR/rsync"
-STUNNEL_OUT_DIR="$OUT_CFG_DIR/stunnel"
+CERT_DIR="/usr/share/phosphor-data-sync/certs"
+RSYNC_OUT_DIR="$OUT_CFG_DIR/config/rsync"
+STUNNEL_OUT_DIR="$OUT_CFG_DIR/config/stunnel"
 
 # Check template files exist
 for f in "$RSYNC_TEMPLATE" "$STUNNEL_TEMPLATE"; do

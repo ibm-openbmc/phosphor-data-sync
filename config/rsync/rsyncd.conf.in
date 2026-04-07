@@ -9,4 +9,4 @@ log file = /dev/null
     read only = false
     uid = root
     gid = root
-    filter = merge /etc/phosphor-data-sync/rsync/rsyncd_bmc_fs.filter
+    filter = merge /usr/share/phosphor-data-sync/config/rsync/rsyncd_bmc_fs.filter

@@ -71,10 +71,10 @@ BMC1_IP
   in the rsync CLI.
 
 ```sh
-/etc/phosphor-data-sync/rsync/bmc0_rsyncd.conf
-/etc/phosphor-data-sync/rsync/bmc1_rsyncd.conf
-/etc/phosphor-data-sync/stunnel/bmc0_stunnel.conf
-/etc/phosphor-data-sync/stunnel/bmc1_stunnel.conf
+/usr/share/phosphor-data-sync/config/rsync/bmc0_rsyncd.conf
+/usr/share/phosphor-data-sync/config/rsync/bmc1_rsyncd.conf
+/usr/share/phosphor-data-sync/config/stunnel/bmc0_stunnel.conf
+/usr/share/phosphor-data-sync/config/stunnel/bmc1_stunnel.conf
 ```
 
 - These generated configuration file will be picked as per the local BMC's

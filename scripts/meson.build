@@ -7,5 +7,5 @@ generated_certs = custom_target(
     command: [files('gen_certs.sh'), meson.current_build_dir()],
     build_by_default: true,
     install: true,
-    install_dir: join_paths(etc_dir, 'certs'),
+    install_dir: join_paths(share_dir, 'certs'),
 )
