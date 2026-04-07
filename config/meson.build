@@ -9,7 +9,7 @@ foreach json_file_name : get_option('data_sync_list')
 
 endforeach
 
-etc_dir = get_option('sysconfdir') + '/phosphor-data-sync/'
+share_dir = get_option('datadir') + '/phosphor-data-sync/'
 
 # Process rsync and stunnel configuration templates to substitute fields
 # defined by Meson
@@ -47,9 +47,9 @@ custom_target(
 )
 
 # Install generated rsync and stunnel configuration files
-install_subdir(gen_cfg_files_path, install_dir: etc_dir, strip_directory: true)
+install_subdir(gen_cfg_files_path, install_dir: share_dir, strip_directory: true)
 install_data(
     'rsync/rsyncd_bmc_fs.filter',
-    install_dir: etc_dir,
+    install_dir: join_paths(share_dir, 'config'),
     preserve_path: true,
 )
