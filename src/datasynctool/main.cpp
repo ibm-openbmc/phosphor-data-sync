@@ -11,12 +11,21 @@ int main(int argc, char* argv[])
     CLI::App app{
         "Data Sync Tool - Command line utility for phosphor-data-sync"};
 
+    auto* fullSyncGroup =
+        app.add_option_group("Full Sync", "Trigger a full sync to the sibling");
+
+    bool fullSync{false};
+    fullSyncGroup->add_flag("-f,--fullSync", fullSync, "Start a full sync");
+
+    auto* statusGroup = app.add_option_group(
+        "Status Display", "Display current status of phosphor-data-sync");
+
     bool showStatus{false};
-    app.add_flag("-s,--status", showStatus,
-                 "Display all D-Bus properties hosted by data sync");
+    statusGroup->add_flag("-s,--status", showStatus,
+                          "Display all D-Bus properties hosted by data sync");
 
     bool jsonOutput{false};
-    app.add_flag("-j,--json", jsonOutput, "Display in JSON format");
+    statusGroup->add_flag("-j,--json", jsonOutput, "Display in JSON format");
 
     // Parse command line arguments
     try
@@ -28,14 +37,26 @@ int main(int argc, char* argv[])
         return app.exit(e);
     }
 
+    int result{0};
+
+    if (fullSync)
+    {
+        result = datasynctool::dbus_interactions::startFullSync();
+        if (result != 0)
+        {
+            return result;
+        }
+    }
+
     if (showStatus)
     {
-        return datasynctool::dbus_interactions::displayStatus(jsonOutput);
+        result = datasynctool::dbus_interactions::displayStatus(jsonOutput);
+        return result;
     }
 
     // Default behavior when no options are provided
     std::println("Data Sync Tool initialized");
     std::println("Use --help for available options.");
 
-    return 0;
+    return result;
 }

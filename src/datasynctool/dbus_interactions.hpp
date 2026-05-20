@@ -30,6 +30,13 @@ PropertyMap getAllProperties(sdbusplus::bus_t& bus, const std::string& service,
                              const std::string& interface);
 
 /**
+ * @brief Start a full synchronization
+ *
+ * @return 0 on success, -1 on error
+ */
+int startFullSync();
+
+/**
  * @brief Build JSON object from D-Bus properties
  *
  * @param[in] properties - Output of the GetAll method

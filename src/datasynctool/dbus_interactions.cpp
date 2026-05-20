@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "dbus_interactions.hpp"
+
 #include "utils.hpp"
 
+#include <phosphor-logging/lg2.hpp>
+#include <sdbusplus/bus.hpp>
 #include <xyz/openbmc_project/Control/SyncBMCData/common.hpp>
 
 #include <iostream>
 #include <print>
+#include <variant>
 
 namespace datasynctool::dbus_interactions
 {
@@ -26,6 +30,39 @@ PropertyMap getAllProperties(sdbusplus::bus_t& bus, const std::string& service,
     auto reply = bus.call(method);
 
     return reply.unpack<PropertyMap>();
+}
+
+int startFullSync()
+{
+    try
+    {
+        auto bus = sdbusplus::bus::new_default();
+        const std::string service = SyncBMCData::interface;
+        const std::string path = SyncBMCData::instance_path;
+        const std::string interface = SyncBMCData::interface;
+
+        lg2::info("datasynctool attempting a full sync.");
+
+        auto method = bus.new_method_call(
+            SyncBMCData::interface, SyncBMCData::instance_path,
+            SyncBMCData::interface, "StartFullSync");
+
+        auto reply = bus.call(method);
+
+        std::println("Full sync initiated. See progress in journal logs");
+        return 0;
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        lg2::error("Error while attempting full sync : {ERROR}", "ERROR", e);
+        return -1;
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Unexpected error while attempting full sync : {ERROR}",
+                   "ERROR", e);
+        return -1;
+    }
 }
 
 json buildStatusJson(const PropertyMap& properties)
