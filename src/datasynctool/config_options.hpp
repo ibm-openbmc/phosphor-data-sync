@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <string>
+
 namespace datasynctool::config_options
 {
 
@@ -14,5 +16,10 @@ namespace datasynctool::config_options
  *          -1 on error
  */
 int listConfigPaths(bool jsonOutput);
+
+/**
+ * @brief Get configuration for a specific path
+ */
+int getPathConfig(const std::string& targetPath, bool jsonOutput);
 
 } // namespace datasynctool::config_options

@@ -48,6 +48,13 @@ int main(int argc, char* argv[])
     configGroup->add_flag("--configPaths", showConfigPaths,
                           "List all configured paths for syncing");
 
+    std::string getConfPath;
+    configGroup
+        ->add_option("--getConf", getConfPath,
+                     "Get data-sync configuration for a specific path")
+        ->type_name("AbsoluteDataPath")
+        ->check(CLI::ExistingPath);
+
     // Parse command line arguments
     try
     {
@@ -82,6 +89,12 @@ int main(int argc, char* argv[])
     if (showConfigPaths)
     {
         result = datasynctool::config_options::listConfigPaths(jsonOutput);
+    }
+
+    if (!getConfPath.empty())
+    {
+        result = datasynctool::config_options::getPathConfig(getConfPath,
+                                                             jsonOutput);
     }
 
     if (showStatus)
