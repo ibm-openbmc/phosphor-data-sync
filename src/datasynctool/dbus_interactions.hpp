@@ -54,4 +54,11 @@ json buildStatusJson(const PropertyMap& properties);
  */
 int displayStatus(bool jsonOutput);
 
+/**
+ * @brief Set the sync enabled/disabled state
+ * @param enable true to enable sync, false to disable
+ * @return 0 on success, -1 on error
+ */
+int setSyncEnabled(bool enable);
+
 } // namespace datasynctool::dbus_interactions

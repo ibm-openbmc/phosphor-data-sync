@@ -121,4 +121,40 @@ int displayStatus(bool jsonOutput)
     }
 }
 
+int setSyncEnabled(bool enable)
+{
+    try
+    {
+        auto bus = sdbusplus::bus::new_default();
+        const std::string service = SyncBMCData::interface;
+        const std::string path = SyncBMCData::instance_path;
+        const std::string interface = SyncBMCData::interface;
+
+        // Log to journal that datasynctool is trying to enable/disable sync
+        lg2::info("datasynctool trying to {ACTION} sync", "ACTION",
+                  enable ? "enable" : "disable");
+
+        auto method = bus.new_method_call(service.c_str(), path.c_str(),
+                                          "org.freedesktop.DBus.Properties",
+                                          "Set");
+        method.append(interface, "DisableSync", std::variant<bool>(!enable));
+
+        auto reply = bus.call(method);
+
+        std::println("Sync {} successfully", enable ? "enabled" : "disabled");
+        return 0;
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        lg2::error("Error setting sync state : {ERROR}", "ERROR", e);
+        return -1;
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Unexpected error while setting sync state : {ERROR}",
+                   "ERROR", e);
+        return -1;
+    }
+}
+
 } // namespace datasynctool::dbus_interactions

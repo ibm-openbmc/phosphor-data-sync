@@ -27,6 +27,19 @@ int main(int argc, char* argv[])
     bool jsonOutput{false};
     statusGroup->add_flag("-j,--json", jsonOutput, "Display in JSON format");
 
+    auto* syncEnableGroup = app.add_option_group("Sync Enable",
+                                                 "Enable or disable sync");
+
+    bool enableSync{false};
+    auto* enableOpt = syncEnableGroup->add_flag("-e,--enableSync", enableSync,
+                                                "Enable sync");
+
+    bool disableSync{false};
+    auto* disableOpt = syncEnableGroup->add_flag("-d,--disableSync",
+                                                 disableSync, "Disable sync");
+
+    enableOpt->excludes(disableOpt);
+
     // Parse command line arguments
     try
     {
@@ -46,6 +59,16 @@ int main(int argc, char* argv[])
         {
             return result;
         }
+    }
+
+    if (enableSync)
+    {
+        result = datasynctool::dbus_interactions::setSyncEnabled(true);
+    }
+
+    if (disableSync)
+    {
+        result = datasynctool::dbus_interactions::setSyncEnabled(false);
     }
 
     if (showStatus)
