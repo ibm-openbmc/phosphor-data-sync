@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include "config_options.hpp"
 #include "dbus_interactions.hpp"
 
 #include <CLI/CLI.hpp>
@@ -40,6 +41,13 @@ int main(int argc, char* argv[])
 
     enableOpt->excludes(disableOpt);
 
+    auto* configGroup = app.add_option_group("Config options",
+                                             "Configuration related options");
+
+    bool showConfigPaths{false};
+    configGroup->add_flag("--configPaths", showConfigPaths,
+                          "List all configured paths for syncing");
+
     // Parse command line arguments
     try
     {
@@ -71,6 +79,11 @@ int main(int argc, char* argv[])
         result = datasynctool::dbus_interactions::setSyncEnabled(false);
     }
 
+    if (showConfigPaths)
+    {
+        result = datasynctool::config_options::listConfigPaths(jsonOutput);
+    }
+
     if (showStatus)
     {
         result = datasynctool::dbus_interactions::displayStatus(jsonOutput);
@@ -78,8 +91,11 @@ int main(int argc, char* argv[])
     }
 
     // Default behavior when no options are provided
-    std::println("Data Sync Tool initialized");
-    std::println("Use --help for available options.");
+    if (argc == 1)
+    {
+        std::println("Data Sync Tool : Usage : datasynctool <options>");
+        std::println("Use --help for available options.");
+    }
 
     return result;
 }

@@ -34,7 +34,22 @@ void displayJsonAsText(const json& data)
     std::println();
     for (const auto& [name, value] : data.items())
     {
-        if (value.is_boolean())
+        if (value.is_array())
+        {
+            std::println("{}:", name);
+            for (const auto& item : value)
+            {
+                if (item.is_string())
+                {
+                    std::println("  {}", item.get<std::string>());
+                }
+                else
+                {
+                    std::println("  {}", item.dump());
+                }
+            }
+        }
+        else if (value.is_boolean())
         {
             printParam(name, value.get<bool>());
         }
