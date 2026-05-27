@@ -2,10 +2,15 @@
 
 #include "data_watcher.hpp"
 
+#include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
+#include <chrono>
 #include <cstring>
+#include <fstream>
+#include <iomanip>
 #include <ranges>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -16,13 +21,15 @@ DataWatcher::DataWatcher(
     sdbusplus::async::context& ctx, const int inotifyFlags,
     const uint32_t eventMasksToWatch, fs::path dataPathToWatch,
     std::optional<std::unordered_set<fs::path>> excludeList,
-    std::optional<std::unordered_set<fs::path>> includeList) :
+    std::optional<std::unordered_set<fs::path>> includeList,
+    std::function<void(const std::vector<fs::path>&)> watcherUpdateCallback) :
     _inotifyFlags(inotifyFlags), _eventMasksToWatch(eventMasksToWatch),
     _dataPathToWatch(std::move(dataPathToWatch)),
     _excludeList(std::move(excludeList)), _includeList(std::move(includeList)),
     _inotifyFileDescriptor(inotifyInit()),
-    _fdioInstance(
-        std::make_unique<sdbusplus::async::fdio>(ctx, _inotifyFileDescriptor()))
+    _fdioInstance(std::make_unique<sdbusplus::async::fdio>(
+        ctx, _inotifyFileDescriptor())),
+    _watcherUpdateCallback(std::move(watcherUpdateCallback))
 {
     createWatchers(_dataPathToWatch);
 }
@@ -166,6 +173,18 @@ void DataWatcher::addToWatchList(const fs::path& pathToWatch,
             (fs::is_directory(pathToWatch) ? pathToWatch / "" : pathToWatch));
         lg2::debug("Watch added. PATH : {PATH}, wd : {WD}", "PATH",
                    _watchDescriptors[wd], "WD", wd);
+
+        // Notify callback about updated watch list
+        if (_watcherUpdateCallback)
+        {
+            std::vector<fs::path> watcherList;
+            watcherList.reserve(_watchDescriptors.size());
+            for (const auto& [wd, path] : _watchDescriptors)
+            {
+                watcherList.push_back(path);
+            }
+            _watcherUpdateCallback(watcherList);
+        }
     }
 }
 
@@ -874,6 +893,18 @@ void DataWatcher::removeWatch(int wd)
 
     lg2::debug("Stopped monitoring {PATH}, WD : {WD}", "PATH", pathToRemove,
                "WD", wd);
+
+    // Notify callback about updated watch list
+    if (_watcherUpdateCallback)
+    {
+        std::vector<fs::path> watcherList;
+        watcherList.reserve(_watchDescriptors.size());
+        for (const auto& [wd, path] : _watchDescriptors)
+        {
+            watcherList.push_back(path);
+        }
+        _watcherUpdateCallback(watcherList);
+    }
 }
 
 } // namespace data_sync::watch::inotify

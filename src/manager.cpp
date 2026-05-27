@@ -11,11 +11,14 @@
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <experimental/scope>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -739,7 +742,10 @@ sdbusplus::async::task<>
                 : std::nullopt;
         watch::inotify::DataWatcher dataWatcher(
             _ctx, IN_NONBLOCK, eventMasksToWatch, dataSyncCfg._path,
-            excludeList, dataSyncCfg._includeList);
+            excludeList, dataSyncCfg._includeList,
+            [this, &dataSyncCfg](const std::vector<fs::path>& watcherList) {
+            this->updateWatcherList(dataSyncCfg._path, watcherList);
+        });
 
         while (!_ctx.stop_requested() && !_syncBMCDataIface.disable_sync())
         {
@@ -920,6 +926,75 @@ sdbusplus::async::task<void> Manager::startFullSync()
     }
 
     co_return;
+}
+
+void Manager::updateWatcherList(const fs::path& configPath,
+                                const std::vector<fs::path>& watcherList)
+{
+    _allWatcherLists[configPath] = watcherList;
+    writeWatcherListToFile();
+}
+
+void Manager::writeWatcherListToFile() const
+{
+    constexpr auto watcherListFile =
+        "/run/phosphor-data-sync/watching-paths.json";
+
+    try
+    {
+        fs::path dirPath = fs::path(watcherListFile).parent_path();
+        if (!fs::exists(dirPath))
+        {
+            fs::create_directories(dirPath);
+        }
+
+        // Build JSON with configured paths as keys and their watcher lists as
+        // values
+        nlohmann::json output;
+        nlohmann::json monitoringPaths;
+
+        for (const auto& [configPath, watcherList] : _allWatcherLists)
+        {
+            std::vector<std::string> paths;
+            for (const auto& path : watcherList)
+            {
+                paths.push_back(path.string());
+            }
+            monitoringPaths[configPath.string()] = paths;
+        }
+
+        output["watching_paths"] = monitoringPaths;
+
+        // Add timestamp
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        std::stringstream ss;
+        ss << std::put_time(std::gmtime(&time_t_now), "%Y-%m-%dT%H:%M:%SZ");
+        output["last_updated"] = ss.str();
+
+        // Write to file atomically via fs::rename (write to temp, then rename)
+        std::string tempFile = std::string(watcherListFile) + ".tmp";
+        std::ofstream file(tempFile);
+        if (!file.is_open())
+        {
+            lg2::error("Failed to open watcher list file for writing: {FILE}",
+                       "FILE", tempFile);
+            return;
+        }
+
+        file << output.dump(4);
+        file.close();
+
+        fs::rename(tempFile, watcherListFile);
+
+        lg2::debug("Updated watcher list file: {FILE}", "FILE",
+                   watcherListFile);
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Error writing watcher list file: {ERROR}", "ERROR",
+                   e.what());
+    }
 }
 
 } // namespace data_sync
