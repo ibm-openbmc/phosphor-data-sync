@@ -55,6 +55,10 @@ int main(int argc, char* argv[])
         ->type_name("AbsoluteDataPath")
         ->check(CLI::ExistingPath);
 
+    bool showWatchingPaths{false};
+    configGroup->add_flag("-w,--listWatchingPaths", showWatchingPaths,
+                          "List all paths currently being watched by inotify");
+
     // Parse command line arguments
     try
     {
@@ -95,6 +99,11 @@ int main(int argc, char* argv[])
     {
         result = datasynctool::config_options::getPathConfig(getConfPath,
                                                              jsonOutput);
+    }
+
+    if (showWatchingPaths)
+    {
+        result = datasynctool::config_options::listWatchingPaths(jsonOutput);
     }
 
     if (showStatus)

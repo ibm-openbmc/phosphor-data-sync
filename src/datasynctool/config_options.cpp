@@ -225,4 +225,54 @@ int getPathConfig(const std::string& targetPath, bool jsonOutput)
     }
 }
 
+int listWatchingPaths(bool jsonOutput)
+{
+    namespace fs = std::filesystem;
+
+    constexpr auto watchingPathsFile =
+        "/run/phosphor-data-sync/watching-paths.json";
+
+    try
+    {
+        if (!fs::exists(watchingPathsFile))
+        {
+            std::cerr << "Watching paths file not found: " << watchingPathsFile
+                      << "\n";
+            std::cerr << "The data-sync daemon may not be running or no paths "
+                         "are being monitored.\n";
+            return -1;
+        }
+
+        std::ifstream file(watchingPathsFile);
+        if (!file.is_open())
+        {
+            std::cerr << "Failed to open: " << watchingPathsFile << "\n";
+            return -1;
+        }
+
+        json data = json::parse(file);
+
+        if (jsonOutput)
+        {
+            std::println("{}", data.dump(4));
+        }
+        else
+        {
+            utils::displayJsonAsText(data);
+        }
+
+        return 0;
+    }
+    catch (const json::exception& e)
+    {
+        std::cerr << "JSON parse error: " << e.what() << "\n";
+        return -1;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error listing watching paths: " << e.what() << "\n";
+        return -1;
+    }
+}
+
 } // namespace datasynctool::config_options
