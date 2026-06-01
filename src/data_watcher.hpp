@@ -10,8 +10,10 @@
 #include <sdbusplus/async.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <unordered_set>
+#include <vector>
 
 namespace data_sync::watch::inotify
 {
@@ -83,12 +85,16 @@ class DataWatcher
      *                           monitoring
      *  @param[in] includeList - The list of paths should be included while
      *                           monitoring
+     *  @param[in] watcherUpdateCallback - Optional callback invoked when watch
+     *                                   list changes
      */
     DataWatcher(
         sdbusplus::async::context& ctx, int inotifyFlags,
         uint32_t eventMasksToWatch, fs::path dataPathToWatch,
         std::optional<std::unordered_set<fs::path>> excludeList = std::nullopt,
-        std::optional<std::unordered_set<fs::path>> includeList = std::nullopt);
+        std::optional<std::unordered_set<fs::path>> includeList = std::nullopt,
+        std::function<void(const std::vector<fs::path>&)>
+            watcherUpdateCallback = nullptr);
     /**
      * @brief Destructor
      * Remove the inotify watch and close fd's
@@ -181,6 +187,11 @@ class DataWatcher
      * saved for map to the corresponding IN_MOVED_TO signals.
      */
     std::map<Cookie, DataOperation> _movedFromDataOps;
+
+    /**
+     * @brief Optional callback invoked when the watch list changes
+     */
+    std::function<void(const std::vector<fs::path>&)> _watcherUpdateCallback;
 
     /**
      * @brief initialize an inotify instance and returns file descriptor
@@ -379,6 +390,14 @@ class DataWatcher
      *  @param[in] wd - Watch descriptor corresponding to the path
      */
     void removeWatch(int wd);
+
+    /**
+     * @brief Write current monitoring paths to a status file
+     *
+     * Writes the list of currently monitored paths from _watchDescriptors
+     * to a JSON file for consumption by external tools like datasynctool.
+     */
+    void writeMonitoringPathsToFile() const;
 };
 
 } // namespace data_sync::watch::inotify

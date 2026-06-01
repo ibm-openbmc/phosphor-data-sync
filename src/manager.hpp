@@ -294,6 +294,20 @@ class Manager
     static bool isRetryEligible(uint8_t errCode) noexcept;
 
     /**
+     * @brief Callback invoked by DataWatcher when watch list changes
+     *
+     * @param[in] configPath - The configured path being monitored
+     * @param[in] watcherList - List of paths currently being watched
+     */
+    void updateWatcherList(const fs::path& configPath,
+                           const std::vector<fs::path>& watcherList);
+
+    /**
+     * @brief Write aggregated watcher list to the file
+     */
+    void writeWatcherListToFile() const;
+
+    /**
      * @brief The async context object used to perform operations asynchronously
      *        as required.
      */
@@ -325,6 +339,13 @@ class Manager
      *        completes.
      */
     std::vector<std::unique_ptr<notify::NotifyService>> _notifyReqs;
+
+    /**
+     * @brief Map of config paths to their watcher lists
+     *        Key: configured path from JSON
+     *        Value: list of paths currently being watched for that config
+     */
+    std::map<fs::path, std::vector<fs::path>> _allWatcherLists;
 };
 
 } // namespace data_sync
