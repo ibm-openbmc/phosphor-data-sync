@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include "config_options.hpp"
 #include "dbus_interactions.hpp"
 
 #include <CLI/CLI.hpp>
@@ -40,6 +41,20 @@ int main(int argc, char* argv[])
 
     enableOpt->excludes(disableOpt);
 
+    auto* configGroup = app.add_option_group("Config options",
+                                             "Configuration related options");
+
+    bool showConfigPaths{false};
+    configGroup->add_flag("-l,--listConfigPaths", showConfigPaths,
+                          "List all configured paths for syncing");
+
+    std::string getConfPath;
+    configGroup
+        ->add_option("-g,--getSyncCfg", getConfPath,
+                     "Get data-sync configuration for a specific path")
+        ->type_name("AbsoluteDataPath")
+        ->check(CLI::ExistingPath);
+
     // Parse command line arguments
     if (argc == 1)
     {
@@ -59,6 +74,18 @@ int main(int argc, char* argv[])
     if (disableSync)
     {
         ctx.spawn(datasynctool::dbus_interactions::setSyncEnabled(ctx, false));
+    }
+
+    if (showConfigPaths)
+    {
+        ctx.spawn(
+            datasynctool::config_options::listConfigPaths(ctx, jsonOutput));
+    }
+
+    if (!getConfPath.empty())
+    {
+        ctx.spawn(datasynctool::config_options::getPathConfig(ctx, getConfPath,
+                                                              jsonOutput));
     }
 
     if (showStatus)
