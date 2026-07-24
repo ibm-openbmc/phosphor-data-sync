@@ -2,6 +2,7 @@
 
 #include "config_options.hpp"
 #include "dbus_interactions.hpp"
+#include "error_summary.hpp"
 
 #include <CLI/CLI.hpp>
 #include <sdbusplus/async.hpp>
@@ -41,6 +42,28 @@ int main(int argc, char* argv[])
 
     enableOpt->excludes(disableOpt);
 
+    auto* errorGroup = app.add_option_group(
+        "DataSync Error Log",
+        "Retrieve and display DataSync component error log summary");
+
+    std::size_t errorLogCount{0};
+    auto* errorLogOpt =
+        errorGroup
+            ->add_option(
+                "-S,--syncFailure", errorLogCount,
+                "Display a summary of recent DataSync sync failure logs.\n"
+                "Pass N to limit output to the N most recent logs.")
+            ->type_name("N")
+            ->expected(0, 1)
+            ->default_val(1);
+
+    bool includeTrace{false};
+    auto* traceOpt = errorGroup->add_flag(
+        "-T,--trace", includeTrace,
+        "Include datasync trace lines in each sync failure log entry.\n"
+        "Only valid with -S/--syncFailure.");
+    traceOpt->needs(errorLogOpt);
+
     auto* configGroup = app.add_option_group("Config options",
                                              "Configuration related options");
 
@@ -74,6 +97,12 @@ int main(int argc, char* argv[])
     CLI11_PARSE(app, argc, argv);
 
     sdbusplus::async::context ctx;
+
+    if (errorLogOpt->count() != 0U)
+    {
+        ctx.spawn(datasynctool::error_summary::displayErrorLogSummary(
+            jsonOutput, errorLogCount, includeTrace));
+    }
 
     if (enableSync)
     {
