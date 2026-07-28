@@ -442,23 +442,68 @@ void Manager::getRsyncCmd([[maybe_unused]] RsyncMode mode, const fs::path& path,
 }
 
 void Manager::filterPaths(const config::DataSyncConfig& dataSyncCfg,
-                               PathTimestampMap& pathMap)
+                          PathTimestampMap& pathMap)
 {
     // Remove excluded paths from the map
     if (dataSyncCfg._excludeList.has_value())
     {
-        std::erase_if(pathMap, [&](const auto&entry) {
+        std::erase_if(pathMap, [&](const auto& entry) {
             return dataSyncCfg._excludeList->first.contains(entry.first);
         });
     }
 
-    // If an include list is configured, remove everything not in it from the map
+    // If an include list is configured, remove everything not in it from the
+    // map
     if (dataSyncCfg._includeList.has_value())
     {
         std::erase_if(pathMap, [&](const auto& entry) {
             return !dataSyncCfg._includeList->contains(entry.first);
         });
     }
+}
+
+Manager::PathTimestampMap Manager::collectLocalPathTimestamps(
+    const config::DataSyncConfig& dataSyncCfg)
+{
+    PathTimestampMap pathTimestamps;
+
+    std::error_code ec;
+    if (!fs::exists(dataSyncCfg._path, ec))
+    {
+        return pathTimestamps;
+    }
+
+    if (dataSyncCfg._isPathDir)
+    {
+        for (const auto& entry :
+             fs::recursive_directory_iterator(dataSyncCfg._path))
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+            auto timestamp =
+                utility::fileTimeToEpoch(fs::last_write_time(entry.path()));
+            if (!timestamp)
+            {
+                continue;
+            }
+            pathTimestamps.emplace(entry.path(), *timestamp);
+        }
+    }
+    else if (fs::is_regular_file(dataSyncCfg._path, ec))
+    {
+        auto timestamp =
+            utility::fileTimeToEpoch(fs::last_write_time(dataSyncCfg._path));
+        if (timestamp)
+        {
+            pathTimestamps.emplace(dataSyncCfg._path, *timestamp);
+        }
+    }
+
+    filterPaths(dataSyncCfg, pathTimestamps);
+
+    return pathTimestamps;
 }
 
 sdbusplus::async::task<std::optional<Manager::PathTimestampMap>>

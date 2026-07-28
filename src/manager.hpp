@@ -230,6 +230,17 @@ class Manager
     void getRsyncCmd(RsyncMode mode, const fs::path& path, std::string& cmd);
 
     /**
+     * @brief Build a local snapshot of absolute paths and their timestamps.
+     *
+     * @param[in] dataSyncCfg - The data sync config whose local path is
+     * scanned.
+     *
+     * @return Map of absolute path to epoch-seconds timestamp.
+     */
+    static PathTimestampMap
+        collectLocalPathTimestamps(const config::DataSyncConfig& dataSyncCfg);
+
+    /**
      * @brief Fetch peer file path info for the configured path.
      *
      * @param[in] dataSyncCfg - The data sync config whose peer path is queried.
@@ -253,7 +264,7 @@ class Manager
      * @param[in,out] pathMap  - The map to filter.
      */
     static void filterPaths(const config::DataSyncConfig& dataSyncCfg,
-                                PathTimestampMap& pathMap);
+                            PathTimestampMap& pathMap);
 
     /**
      * @brief A helper rsync wrapper API that syncs data to sibling
