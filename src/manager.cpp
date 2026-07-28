@@ -565,6 +565,91 @@ sdbusplus::async::task<std::optional<Manager::PathTimestampMap>>
     co_return std::make_optional(std::move(pathTimestamps));
 }
 
+Manager::PathList
+    Manager::getRemotelyDeletedPaths(const PathTimestampMap& localInfo,
+                                     const PathTimestampMap& peerInfo,
+                                     std::chrono::seconds syncDisableTime)
+{
+    PathList remotelyDeletedPaths;
+
+    for (const auto& [path, timestamp] : localInfo)
+    {
+        // Paths not present on peer BMC with a timestamp older than
+        // syncDisableTime are deleted paths on the peer intentionally. Paths
+        // newer than syncDisableTime were created locally during the disabled
+        // window and must be kept.
+        if (!peerInfo.contains(path) && timestamp < syncDisableTime)
+        {
+            remotelyDeletedPaths.emplace_back(path);
+        }
+    }
+
+    return remotelyDeletedPaths;
+}
+
+void Manager::deleteRemotelyDeletedPaths(const PathList& remotelyDeletedPaths)
+{
+    for (const auto& path : remotelyDeletedPaths)
+    {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+        if (ec)
+        {
+            lg2::error(
+                "Failed to delete remotely deleted path [{PATH}], Error: {ERROR}",
+                "PATH", path, "ERROR", ec.message());
+            continue;
+        }
+
+        lg2::debug("Deleted [{PATH}] on local BMC as it deleted at peer",
+                   "PATH", path);
+    }
+}
+
+sdbusplus::async::task<>
+    Manager::runPreSyncCleanup(const config::DataSyncConfig& cfg)
+{
+    // step 1 : read the sync disabled timestamp
+    auto syncDisableTime = data_sync::persist::readRawFile(
+        data_sync::persist::SyncDisableTimeFile);
+    if (!syncDisableTime)
+    {
+        lg2::warning(
+            "Sync disable time missing, skipping pre-sync cleanup algorithm for [{PATH}]",
+            "PATH", cfg._path);
+        co_return;
+    }
+
+    lg2::debug(
+        "Running the pre sync cleanup for {PATH} before issuing full sync",
+        "PATH", cfg._path);
+
+    // Step 2 : Collect the list of available files and their mtime from local
+    // BMC
+    auto localInfo = collectLocalPathTimestamps(cfg);
+
+    // Step 3 : Collect the list of available files and their mtime from peer
+    // BMC
+    auto peerInfo = co_await pullPeerInfo(cfg);
+    if (!peerInfo)
+    {
+        lg2::warning(
+            "Failed to pull peer info for [{PATH}], skipping pre-sync cleanup",
+            "PATH", cfg._path);
+        co_return;
+    }
+
+    // Step 4 : Find paths avaialble only on local BMC
+    // Step 5 : Find the deleted paths among the paths returning from step 4
+    auto remotelyDeletedPaths = getRemotelyDeletedPaths(
+        localInfo, *peerInfo, std::chrono::seconds{*syncDisableTime});
+
+    // Step 6 : Remove the deleted paths at the peer on local BMC
+    deleteRemotelyDeletedPaths(remotelyDeletedPaths);
+
+    co_return;
+}
+
 sdbusplus::async::task<void>
     // NOLINTNEXTLINE
     Manager::triggerSiblingNotification(
@@ -1060,6 +1145,14 @@ void Manager::setSyncEventsHealth(const SyncEventsHealth& syncEventsHealth)
 }
 
 // NOLINTNEXTLINE
+sdbusplus::async::task<bool>
+    Manager::preSyncAndSync(const config::DataSyncConfig& cfg)
+{
+    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch)
+    co_await runPreSyncCleanup(cfg);
+    co_return co_await syncData(cfg);
+}
+
 sdbusplus::async::task<void> Manager::startFullSync()
 {
     lg2::info("Full Sync started");
@@ -1078,13 +1171,19 @@ sdbusplus::async::task<void> Manager::startFullSync()
         {
             if (isSyncEligible(cfg))
             {
+                auto task =
+                    (cfg._syncDirection == config::SyncDirection::Bidirectional)
+                        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch)
+                        ? preSyncAndSync(cfg)
+                        : syncData(cfg);
+
                 _ctx.spawn(
-                    syncData(cfg) |
+                    std::move(task) |
                     stdexec::then([&syncResults, &spawnedTasks](bool result) {
                     syncResults.push_back(result);
-                    spawnedTasks--; // Decrement the number of spawned tasks
+                    spawnedTasks--;
                 }));
-                spawnedTasks++;     // Increment the number of spawned tasks
+                spawnedTasks++;
             }
         }
         catch (const std::exception& e)
