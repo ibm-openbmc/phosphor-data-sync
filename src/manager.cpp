@@ -341,13 +341,18 @@ void Manager::getRsyncCmd(RsyncMode mode,
 
     cmd.append("rsync --compress --recursive --perms --group --owner --times "
                "--atimes --update"s);
-    if (mode == RsyncMode::Sync)
+    if (mode == RsyncMode::Sync || mode == RsyncMode::BidirFullSync)
     {
         // Appending required flags to sync data between BMCs
         // For more details about CLI options, refer rsync man page.
         // https://download.samba.org/pub/rsync/rsync.1#OPTION_SUMMARY
 
-        cmd.append(" --relative --delete --delete-missing-args --stats"s);
+        cmd.append(" --relative --stats"s);
+
+        if (mode == RsyncMode::Sync)
+        {
+            cmd.append(" --delete --delete-missing-args"s);
+        }
 
         if (dataSyncCfg._excludeList.has_value())
         {
@@ -408,7 +413,7 @@ void Manager::getRsyncCmd(RsyncMode mode,
     cmd.append(rsyncdURL);
 #endif
 
-    if (mode == RsyncMode::Sync)
+    if (mode == RsyncMode::Sync || mode == RsyncMode::BidirFullSync)
     {
         // Add destination data path if configured
         cmd.append(dataSyncCfg._destPath.value_or(fs::path("")).string());
@@ -851,8 +856,14 @@ sdbusplus::async::task<bool>
         cleanup.release();
     }
 
+    const auto rsyncMode =
+        (dataSyncCfg._syncDirection == config::SyncDirection::Bidirectional &&
+         getFullSyncStatus() == FullSyncStatus::FullSyncInProgress)
+            ? RsyncMode::BidirFullSync
+            : RsyncMode::Sync;
+
     std::string syncCmd{};
-    getRsyncCmd(RsyncMode::Sync, dataSyncCfg, srcPath.string(), syncCmd);
+    getRsyncCmd(rsyncMode, dataSyncCfg, srcPath.string(), syncCmd);
 
     if (syncCmd.empty())
     {
@@ -1298,6 +1309,16 @@ sdbusplus::async::task<void> Manager::startFullSync()
         lg2::info(
             "Full Sync completed successfully. Elapsed time : [{DURATION_SECONDS}] seconds",
             "DURATION_SECONDS", FullsyncElapsedTime.count());
+
+        std::error_code ec;
+        fs::remove(data_sync::persist::SyncDisableTimeFile, ec);
+        if (ec)
+        {
+            lg2::warning(
+                "Failed to remove syncDisableTime file after full sync completion: {ERROR}",
+                "ERROR", ec.message());
+        }
+
         setFullSyncStatus(FullSyncStatus::FullSyncCompleted);
         setSyncEventsHealth(SyncEventsHealth::Ok);
     }

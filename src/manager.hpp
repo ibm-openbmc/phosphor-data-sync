@@ -33,6 +33,7 @@ enum class RsyncMode
 {
     Sync,                    // perform sync
     Notify,                  // perform sibling notification
+    BidirFullSync,           // perform bidirectional full sync
     PullPeerInfo,            // fetch peer file listing + mtimes
     PullPeerSyncDisableTime, // fetch syncDisableTime file from peer
 };
