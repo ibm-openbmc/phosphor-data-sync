@@ -31,8 +31,11 @@ namespace fs = std::filesystem;
 
 enum class RsyncMode
 {
-    Sync,  // perform sync
-    Notify // perform sibling notification
+    Sync,                    // perform sync
+    Notify,                  // perform sibling notification
+    BidirFullSync,           // perform bidirectional full sync
+    PullPeerInfo,            // fetch peer file listing + mtimes
+    PullPeerSyncDisableTime, // fetch syncDisableTime file from peer
 };
 
 /**
@@ -152,6 +155,8 @@ class Manager
     void setSyncEventsHealth(const SyncEventsHealth& syncEventsHealth);
 
   private:
+    using PathTimestampMap = std::map<fs::path, std::chrono::seconds>;
+    using PathList = std::vector<fs::path>;
     /**
      * @brief A helper API to start the data sync operation.
      */
@@ -215,6 +220,109 @@ class Manager
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     void getRsyncCmd(RsyncMode mode, const config::DataSyncConfig& dataSyncCfg,
                      const std::string& srcPath, std::string& cmd);
+
+    /**
+     * @brief API to frame the RSYNC CLI command to Pull the info from peer
+     *       BMC
+     *
+     * @param[in] mode - RsyncMode : PullPeerInfo or PullPeerSyncDisableTime
+     * @param[in] path - The absolute path to fetch from the peer.
+     * @param[out] cmd - string where the framed RSYNC command holds.
+     */
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    void getRsyncCmd(RsyncMode mode, const fs::path& path, std::string& cmd);
+
+    /**
+     * @brief Build a local snapshot of absolute paths and their timestamps.
+     *
+     * @param[in] dataSyncCfg - The data sync config whose local path is
+     * scanned.
+     *
+     * @return Map of absolute path to epoch-seconds timestamp.
+     */
+    static PathTimestampMap
+        collectLocalPathTimestamps(const config::DataSyncConfig& dataSyncCfg);
+
+    /**
+     * @brief Fetch peer file path info for the configured path.
+     *
+     * @param[in] dataSyncCfg - The data sync config whose peer path is queried.
+     *
+     * @return Map of absolute peer paths to epoch-seconds timestamp on success,
+     *         or std::nullopt if the peer could not be reached or the command
+     *         failed.
+     */
+    sdbusplus::async::task<std::optional<PathTimestampMap>>
+        pullPeerInfo(const config::DataSyncConfig& dataSyncCfg);
+
+    /**
+     * @brief Filter the PathTimestampMap based on the configured
+     *        include and exclude lists.
+     *
+     *        - Paths present in the exclude list are removed.
+     *        - If an include list is configured, only paths in that list
+     *          are retained; all others will get removed.
+     *
+     * @param[in] dataSyncCfg - The data sync config carrying the lists.
+     * @param[in,out] pathMap  - The map to filter.
+     */
+    static void filterPaths(const config::DataSyncConfig& dataSyncCfg,
+                            PathTimestampMap& pathMap);
+
+    /**
+     * @brief Fetch the sync disable time file from peer.
+     *
+     * @return True if the local file exists or was fetched successfully;
+     *         otherwise false.
+     */
+    sdbusplus::async::task<bool> pullPeerSyncDisableTime();
+
+    /**
+     * @brief Collect paths present only locally that were deleted on the peer.
+     *
+     * Iterates the local snapshot in a single pass: a path is classified as
+     * remotely deleted if it is absent from the peer snapshot and its mtime
+     * is older than the sync-disable timestamp.
+     *
+     * @param[in] localInfo - Local path/timestamp map.
+     * @param[in] peerInfo - Peer path/timestamp map.
+     * @param[in] syncDisableTime - Timestamp when sync was disabled.
+     *
+     * @return List of paths to remove from the local filesystem before rsync.
+     */
+    static PathList
+        getRemotelyDeletedPaths(const PathTimestampMap& localInfo,
+                                const PathTimestampMap& peerInfo,
+                                std::chrono::seconds syncDisableTime);
+
+    /**
+     * @brief Delete paths locally that were removed on the peer.
+     *
+     * @param[in] remotelyDeletedPaths - Paths to delete from the local BMC.
+     */
+    static void
+        deleteRemotelyDeletedPaths(const PathList& remotelyDeletedPaths);
+
+    /**
+     * @brief Trigger the pre-sync classification algorithm to remove the
+     * remotely deleted paths before full sync for bidirectional sync paths.
+     *
+     * @param[in] cfg - The data sync config object
+     */
+    sdbusplus::async::task<>
+        runPreSyncCleanup(const config::DataSyncConfig& cfg);
+
+    /**
+     * @brief Run pre-sync cleanup followed by a full sync for a bidirectional
+     *        config. Chains runPreSyncCleanup and syncData into a single
+     *        spawnable task so both run concurrently with other configs.
+     *
+     * @param[in] cfg - The data sync config object
+     *
+     * @return Returns true if sync succeeds; otherwise, returns false
+     */
+    sdbusplus::async::task<bool>
+        preSyncAndSync(const config::DataSyncConfig& cfg);
 
     /**
      * @brief A helper rsync wrapper API that syncs data to sibling

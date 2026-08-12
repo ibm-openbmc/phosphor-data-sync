@@ -19,6 +19,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstring>
+#include <ctime>
 #include <exception>
 #include <experimental/scope>
 #include <fstream>
@@ -362,13 +363,18 @@ void Manager::getRsyncCmd(RsyncMode mode,
 
     cmd.append("rsync --compress --recursive --perms --group --owner --times "
                "--atimes --update"s);
-    if (mode == RsyncMode::Sync)
+    if (mode == RsyncMode::Sync || mode == RsyncMode::BidirFullSync)
     {
         // Appending required flags to sync data between BMCs
         // For more details about CLI options, refer rsync man page.
         // https://download.samba.org/pub/rsync/rsync.1#OPTION_SUMMARY
 
-        cmd.append(" --relative --delete --delete-missing-args --stats"s);
+        cmd.append(" --relative --stats"s);
+
+        if (mode == RsyncMode::Sync)
+        {
+            cmd.append(" --delete --delete-missing-args"s);
+        }
 
         if (dataSyncCfg._excludeList.has_value())
         {
@@ -429,7 +435,7 @@ void Manager::getRsyncCmd(RsyncMode mode,
     cmd.append(rsyncdURL);
 #endif
 
-    if (mode == RsyncMode::Sync)
+    if (mode == RsyncMode::Sync || mode == RsyncMode::BidirFullSync)
     {
         // Add destination data path if configured
         cmd.append(dataSyncCfg._destPath.value_or(fs::path("")).string());
@@ -437,6 +443,322 @@ void Manager::getRsyncCmd(RsyncMode mode,
     else if (mode == RsyncMode::Notify)
     {
         cmd.append(NOTIFY_SERVICES_DIR);
+    }
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+void Manager::getRsyncCmd(RsyncMode mode, const fs::path& path,
+                          std::string& cmd)
+{
+    using namespace std::string_literals;
+
+    if (mode == RsyncMode::PullPeerInfo)
+    {
+        cmd.append("rsync --recursive --list-only"s);
+    }
+    else if (mode == RsyncMode::PullPeerSyncDisableTime)
+    {
+        cmd.append(
+            "rsync --compress --perms --group --owner --times --atimes"s);
+    }
+
+#ifdef UNIT_TEST
+    cmd.append(" "s);
+    cmd.append(path.string());
+#else
+    static const std::string rsyncdURL(
+        std::format(" rsync://localhost:{}/{}",
+                    (_extDataIfaces->bmcPosition() == 0 ? BMC1_RSYNC_PORT
+                                                        : BMC0_RSYNC_PORT),
+                    RSYNCD_MODULE_NAME));
+
+    if (mode == RsyncMode::PullPeerInfo)
+    {
+        // --list-only only needs the remote source, no local destination
+        cmd.append(rsyncdURL + path.string());
+    }
+    else if (mode == RsyncMode::PullPeerSyncDisableTime)
+    {
+        // rsync <flags>  rsync://<host>/<module>/<path>  <local_dst>
+        cmd.append(rsyncdURL + path.string());
+        cmd.append(" "s + path.string());
+    }
+#endif
+}
+
+void Manager::filterPaths(const config::DataSyncConfig& dataSyncCfg,
+                          PathTimestampMap& pathMap)
+{
+    // Remove excluded paths from the map
+    if (dataSyncCfg._excludeList.has_value())
+    {
+        std::erase_if(pathMap, [&](const auto& entry) {
+            return dataSyncCfg._excludeList->first.contains(entry.first);
+        });
+    }
+
+    // If an include list is configured, remove everything not in it from the
+    // map
+    if (dataSyncCfg._includeList.has_value())
+    {
+        std::erase_if(pathMap, [&](const auto& entry) {
+            return !dataSyncCfg._includeList->contains(entry.first);
+        });
+    }
+}
+
+Manager::PathTimestampMap Manager::collectLocalPathTimestamps(
+    const config::DataSyncConfig& dataSyncCfg)
+{
+    PathTimestampMap pathTimestamps;
+
+    std::error_code ec;
+    if (!fs::exists(dataSyncCfg._path, ec))
+    {
+        return pathTimestamps;
+    }
+
+    if (dataSyncCfg._isPathDir)
+    {
+        for (const auto& entry :
+             fs::recursive_directory_iterator(dataSyncCfg._path))
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+            auto timestamp =
+                utility::fileTimeToEpoch(fs::last_write_time(entry.path()));
+            if (!timestamp)
+            {
+                continue;
+            }
+            pathTimestamps.emplace(entry.path(), *timestamp);
+        }
+    }
+    else if (fs::is_regular_file(dataSyncCfg._path, ec))
+    {
+        auto timestamp =
+            utility::fileTimeToEpoch(fs::last_write_time(dataSyncCfg._path));
+        if (timestamp)
+        {
+            pathTimestamps.emplace(dataSyncCfg._path, *timestamp);
+        }
+    }
+
+    filterPaths(dataSyncCfg, pathTimestamps);
+
+    return pathTimestamps;
+}
+
+sdbusplus::async::task<std::optional<Manager::PathTimestampMap>>
+    Manager::pullPeerInfo(const config::DataSyncConfig& dataSyncCfg)
+{
+    std::string cmd;
+    getRsyncCmd(RsyncMode::PullPeerInfo, dataSyncCfg._path, cmd);
+    if (cmd.empty())
+    {
+        co_return std::nullopt;
+    }
+    lg2::debug("Pull peer info cmd: [{CMD}]", "CMD", cmd);
+
+    data_sync::async::AsyncCommandExecutor executor(_ctx);
+    auto result = co_await executor.execCmd(cmd);
+    if (result.first != 0)
+    {
+        lg2::error(
+            "Failed to pull peer info for [{PATH}], ErrCode: {ERRCODE}, ErrMsg: {ERRMSG}, Cmd : [{CMD}]",
+            "PATH", dataSyncCfg._path, "ERRCODE", result.first, "ERRMSG",
+            result.second, "CMD", cmd);
+        co_return std::nullopt;
+    }
+
+    PathTimestampMap pathTimestamps;
+    std::istringstream output(result.second);
+    std::string line;
+
+    while (std::getline(output, line))
+    {
+        std::istringstream lineStream(line);
+        std::string perms;
+        std::string size;
+        std::string date;
+        std::string time;
+        std::string relativePath;
+
+        if (lineStream >> perms >> size >> date >> time >> relativePath)
+        {
+            if (relativePath == ".")
+            {
+                continue;
+            }
+
+            std::string dateTime{};
+            dateTime.append(date);
+            dateTime.append(" ");
+            dateTime.append(time);
+            if (const auto timestamp = utility::parseDateTimeToEpoch(dateTime))
+            {
+                pathTimestamps.emplace(dataSyncCfg._path / relativePath,
+                                       *timestamp);
+            }
+        }
+    }
+
+    filterPaths(dataSyncCfg, pathTimestamps);
+
+    co_return std::make_optional(std::move(pathTimestamps));
+}
+
+sdbusplus::async::task<bool> Manager::pullPeerSyncDisableTime()
+{
+    std::string cmd;
+    getRsyncCmd(RsyncMode::PullPeerSyncDisableTime,
+                data_sync::persist::SyncDisableTimeFile, cmd);
+    if (cmd.empty())
+    {
+        co_return false;
+    }
+
+    data_sync::async::AsyncCommandExecutor executor(_ctx);
+    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch)
+    auto result = co_await executor.execCmd(cmd);
+    if (result.first == 0)
+    {
+        lg2::debug("Fetched syncDisableTime file from peer successfully");
+        co_return true;
+    }
+
+    if (result.first == 23)
+    {
+        lg2::debug("syncDisableTime file appears to missing in peer as well");
+        co_return false;
+    }
+
+    lg2::error(
+        "Failed to fetch syncDisableTime file from peer.Cmd : {CMD},  ErrCode: {ERRCODE}, ErrMsg: {ERRMSG}",
+        "CMD", cmd, "ERRCODE", result.first, "ERRMSG", result.second);
+    co_return false;
+}
+
+Manager::PathList
+    Manager::getRemotelyDeletedPaths(const PathTimestampMap& localInfo,
+                                     const PathTimestampMap& peerInfo,
+                                     std::chrono::seconds syncDisableTime)
+{
+    PathList remotelyDeletedPaths;
+
+    for (const auto& [path, timestamp] : localInfo)
+    {
+        // Paths not present on peer BMC with a timestamp older than
+        // syncDisableTime are deleted paths on the peer intentionally. Paths
+        // newer than syncDisableTime were created locally during the disabled
+        // window and must be kept.
+        if (!peerInfo.contains(path) && timestamp < syncDisableTime)
+        {
+            remotelyDeletedPaths.emplace_back(path);
+        }
+    }
+
+    return remotelyDeletedPaths;
+}
+
+void Manager::deleteRemotelyDeletedPaths(const PathList& remotelyDeletedPaths)
+{
+    for (const auto& path : remotelyDeletedPaths)
+    {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+        if (ec)
+        {
+            lg2::error(
+                "Failed to delete remotely deleted path [{PATH}], Error: {ERROR}",
+                "PATH", path, "ERROR", ec.message());
+            continue;
+        }
+
+        lg2::debug("Deleted [{PATH}] on local BMC as it deleted at peer",
+                   "PATH", path);
+    }
+}
+
+sdbusplus::async::task<>
+    Manager::runPreSyncCleanup(const config::DataSyncConfig& cfg)
+{
+    std::optional<std::string> skipReason;
+
+    // Step 1 : Read the sync disabled timestamp
+    auto syncDisableTime = data_sync::persist::readRawFile(
+        data_sync::persist::SyncDisableTimeFile);
+
+    if (!syncDisableTime)
+    {
+        // NOLINTNEXTLINE
+        auto fetched = co_await pullPeerSyncDisableTime();
+        if (!fetched)
+        {
+            skipReason =
+                "Sync disable timestamp missing locally and on peer, "
+                "remotely deleted paths may not be cleaned up before full sync";
+        }
+        else
+        {
+            syncDisableTime = data_sync::persist::readRawFile(
+                data_sync::persist::SyncDisableTimeFile);
+            if (!syncDisableTime)
+            {
+                skipReason =
+                    "Sync disable timestamp unreadable after peer fetch, "
+                    "remotely deleted paths may not be cleaned up before full sync";
+            }
+        }
+    }
+
+    if (!skipReason.has_value())
+    {
+        lg2::debug(
+            "Running the pre sync cleanup for {PATH} before issuing full sync",
+            "PATH", cfg._path);
+
+        // Step 2 : Collect the list of available files and their mtime from
+        // local BMC
+        auto localInfo = collectLocalPathTimestamps(cfg);
+
+        // Step 3 : Collect the list of available files and their mtime from
+        // peer BMC NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch)
+        auto peerInfo = co_await pullPeerInfo(cfg);
+        if (!peerInfo)
+        {
+            skipReason =
+                "Failed to retrieve peer file list, "
+                "remotely deleted paths may not be cleaned up before full sync";
+        }
+        else
+        {
+            // Step 4 : Find paths available only on local BMC
+            // Step 5 : Find the deleted paths among the paths returning from
+            // step 4
+            auto remotelyDeletedPaths = getRemotelyDeletedPaths(
+                localInfo, *peerInfo, std::chrono::seconds{*syncDisableTime});
+
+            // Step 6 : Remove the deleted paths at the peer on local BMC
+            deleteRemotelyDeletedPaths(remotelyDeletedPaths);
+        }
+    }
+
+    if (skipReason.has_value())
+    {
+        lg2::warning("Pre-sync cleanup skipped for [{PATH}]: {REASON}", "PATH",
+                     cfg._path, "REASON", *skipReason);
+
+        ext_data::AdditionalData additionalDetails = {
+            {"BMC_Role", _extDataIfaces->bmcRoleInStr()},
+            {"DS_Sync_Path", cfg._path.string()},
+            {"DS_Sync_Direction", std::string(cfg.getSyncDirectionInStr())},
+            {"DS_Sync_Msg", *skipReason}};
+        co_await _extDataIfaces->createErrorLog(
+            "xyz.openbmc_project.RBMC_DataSync.Error.SyncFailure",
+            ext_data::ErrorLevel::Informational, additionalDetails);
     }
 }
 
@@ -556,8 +878,14 @@ sdbusplus::async::task<bool>
         cleanup.release();
     }
 
+    const auto rsyncMode =
+        (dataSyncCfg._syncDirection == config::SyncDirection::Bidirectional &&
+         getFullSyncStatus() == FullSyncStatus::FullSyncInProgress)
+            ? RsyncMode::BidirFullSync
+            : RsyncMode::Sync;
+
     std::string syncCmd{};
-    getRsyncCmd(RsyncMode::Sync, dataSyncCfg, srcPath.string(), syncCmd);
+    getRsyncCmd(rsyncMode, dataSyncCfg, srcPath.string(), syncCmd);
 
     if (syncCmd.empty())
     {
@@ -967,6 +1295,29 @@ void Manager::disableSyncPropChanged(bool disableSync)
     if (disableSync)
     {
         // TODO: Disable all sync events using Sender Receiver.
+        try
+        {
+            if (fs::exists(data_sync::persist::SyncDisableTimeFile))
+            {
+                lg2::debug(
+                    "Persisted sync disabled time stamp already exists, skipping the latest");
+            }
+            else
+            {
+                auto now = std::chrono::system_clock::now();
+                auto timestamp =
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        now.time_since_epoch())
+                        .count();
+                data_sync::persist::writeRawFile(
+                    data_sync::persist::SyncDisableTimeFile, timestamp);
+            }
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("Error writing syncDisableTime to file: {ERROR}",
+                       "ERROR", e);
+        }
         lg2::info("Sync is Disabled, Stopping events");
     }
     else
@@ -1024,6 +1375,14 @@ void Manager::setSyncEventsHealth(const SyncEventsHealth& syncEventsHealth)
 }
 
 // NOLINTNEXTLINE
+sdbusplus::async::task<bool>
+    Manager::preSyncAndSync(const config::DataSyncConfig& cfg)
+{
+    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch)
+    co_await runPreSyncCleanup(cfg);
+    co_return co_await syncData(cfg);
+}
+
 sdbusplus::async::task<void> Manager::startFullSync()
 {
     lg2::info("Full Sync started");
@@ -1042,13 +1401,19 @@ sdbusplus::async::task<void> Manager::startFullSync()
         {
             if (isSyncEligible(cfg))
             {
+                auto task =
+                    (cfg._syncDirection == config::SyncDirection::Bidirectional)
+                        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch)
+                        ? preSyncAndSync(cfg)
+                        : syncData(cfg);
+
                 _ctx.spawn(
-                    syncData(cfg) |
+                    std::move(task) |
                     stdexec::then([&syncResults, &spawnedTasks](bool result) {
                     syncResults.push_back(result);
-                    spawnedTasks--; // Decrement the number of spawned tasks
+                    spawnedTasks--;
                 }));
-                spawnedTasks++;     // Increment the number of spawned tasks
+                spawnedTasks++;
             }
         }
         catch (const std::exception& e)
@@ -1078,6 +1443,16 @@ sdbusplus::async::task<void> Manager::startFullSync()
         lg2::info(
             "Full Sync completed successfully. Elapsed time : [{DURATION_SECONDS}] seconds",
             "DURATION_SECONDS", FullsyncElapsedTime.count());
+
+        std::error_code ec;
+        fs::remove(data_sync::persist::SyncDisableTimeFile, ec);
+        if (ec)
+        {
+            lg2::warning(
+                "Failed to remove syncDisableTime file after full sync completion: {ERROR}",
+                "ERROR", ec.message());
+        }
+
         setFullSyncStatus(FullSyncStatus::FullSyncCompleted);
         setSyncEventsHealth(SyncEventsHealth::Ok);
     }

@@ -30,6 +30,10 @@ TEST_F(ManagerTest, PeriodicDataSyncTest)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile1"},
@@ -101,6 +105,10 @@ TEST_F(ManagerTest, PeriodicDataSyncDelayFileTest)
         // NOLINTNEXTLINE
         .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
 
+    EXPECT_CALL(*mockExtDataIfaces,
+                createErrorLog(testing::_, testing::_, testing::_, testing::_))
+        .WillRepeatedly([]() -> sdbusplus::async::task<> { co_return; });
+
     nlohmann::json jsonData = {
         {"Files",
          {{{"Path", ManagerTest::tmpDataSyncDataDir.string() + "/srcFile1"},
@@ -108,7 +116,9 @@ TEST_F(ManagerTest, PeriodicDataSyncDelayFileTest)
            {"Description", "Parse test file"},
            {"SyncDirection", "Bidirectional"},
            {"SyncType", "Periodic"},
-           {"Periodicity", "PT1S"}}}}};
+           {"Periodicity", "PT1S"},
+           {"RetryAttempts", 2},
+           {"RetryInterval", "PT10S"}}}}};
 
     fs::path srcFile{jsonData["Files"][0]["Path"]};
     fs::path destDir{jsonData["Files"][0]["DestinationPath"]};

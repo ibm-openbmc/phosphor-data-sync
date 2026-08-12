@@ -2,8 +2,13 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
+#include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
+
 namespace data_sync::utility
 {
 
@@ -66,6 +71,26 @@ class FD
  *      - To keep the received notify requests form sibling BMC.
  */
 void setupPaths();
+
+/**
+ * @brief Convert a date/time string to epoch-seconds timestamp.
+ *
+ * @param[in] dateTime - Date/time string in "%Y/%m/%d %H:%M:%S" format.
+ *
+ * @return Parsed epoch-seconds timestamp, or std::nullopt on failure.
+ */
+std::optional<std::chrono::seconds>
+    parseDateTimeToEpoch(std::string_view dateTime);
+
+/**
+ * @brief Convert a filesystem time point to epoch-seconds timestamp.
+ *
+ * @param[in] fileTime - Filesystem time point to convert.
+ *
+ * @return Converted epoch-seconds timestamp.
+ */
+std::optional<std::chrono::seconds>
+    fileTimeToEpoch(const std::filesystem::file_time_type& fileTime);
 
 namespace rsync
 {
