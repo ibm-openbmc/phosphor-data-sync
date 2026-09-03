@@ -18,6 +18,9 @@
 namespace datasynctool::dbus_interactions
 {
 
+static constexpr auto dataSyncService =
+    "xyz.openbmc_project.Control.SyncBMCData.service";
+
 using SyncBMCData =
     sdbusplus::common::xyz::openbmc_project::control::SyncBMCData;
 
@@ -217,6 +220,13 @@ sdbusplus::async::task<std::string>
     {
         co_return std::string("unknown");
     }
+}
+
+sdbusplus::async::task<bool>
+    isDataSyncServiceRunning(sdbusplus::async::context& ctx)
+{
+    auto state = co_await getServiceActiveState(ctx, dataSyncService);
+    co_return state == "active";
 }
 
 } // namespace datasynctool::dbus_interactions
