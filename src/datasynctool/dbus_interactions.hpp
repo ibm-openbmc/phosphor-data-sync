@@ -93,5 +93,18 @@ sdbusplus::async::task<pid_t> getServiceMainPid(sdbusplus::async::context& ctx,
 sdbusplus::async::task<std::string>
     getServiceActiveState(sdbusplus::async::context& ctx,
                           const std::string& serviceName);
+/**
+ * @brief Check whether the phosphor-data-sync service is running
+ *
+ * Queries to check if the Datasync service is running.
+ * Returns false when the service is not running
+ * so callers can skip D-Bus interactions that require it.
+ *
+ * @param[in] ctx - async context
+ *
+ * @return bool - true if the service is running, false otherwise
+ */
+sdbusplus::async::task<bool>
+    isDataSyncServiceRunning(sdbusplus::async::context& ctx);
 
 } // namespace datasynctool::dbus_interactions
