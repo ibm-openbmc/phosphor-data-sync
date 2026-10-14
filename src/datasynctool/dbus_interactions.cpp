@@ -183,7 +183,7 @@ sdbusplus::async::task<pid_t> getServiceMainPid(sdbusplus::async::context& ctx,
     {
         auto unitPath = co_await systemd.path("/org/freedesktop/systemd1")
                             .interface("org.freedesktop.systemd1.Manager")
-                            .call<sdbusplus::message::object_path>(
+                            .call<sdbusplus::object_path>(
                                 ctx, "GetUnit", serviceName);
 
         auto mainPid = co_await systemd.path(unitPath.str)
@@ -209,7 +209,7 @@ sdbusplus::async::task<std::string>
     {
         auto unitPath = co_await systemd.path("/org/freedesktop/systemd1")
                             .interface("org.freedesktop.systemd1.Manager")
-                            .call<sdbusplus::message::object_path>(
+                            .call<sdbusplus::object_path>(
                                 ctx, "GetUnit", serviceName);
 
         co_return co_await systemd.path(unitPath.str)

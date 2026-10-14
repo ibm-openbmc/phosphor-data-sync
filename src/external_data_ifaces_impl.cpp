@@ -96,7 +96,7 @@ sdbusplus::async::task<bool> ExternalDataIFacesImpl::systemdServiceAction(
                                  .path("/org/freedesktop/systemd1")
                                  .interface("org.freedesktop.systemd1.Manager");
 
-        using objectPath = sdbusplus::message::object_path;
+        using objectPath = sdbusplus::object_path;
         lg2::info("Requesting systemd to {METHOD}:{SERVICE} due to data update",
                   "METHOD", systemdMethod, "SERVICE", service);
         co_await systemdReload.call<objectPath>(_ctx, systemdMethod, service,
