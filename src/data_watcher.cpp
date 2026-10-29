@@ -16,13 +16,16 @@ DataWatcher::DataWatcher(
     sdbusplus::async::context& ctx, const int inotifyFlags,
     const uint32_t eventMasksToWatch, fs::path dataPathToWatch,
     std::optional<std::unordered_set<fs::path>> excludeList,
-    std::optional<std::unordered_set<fs::path>> includeList) :
+    std::optional<std::unordered_set<fs::path>> includeList,
+    std::function<bool()> stopEventsCallback) :
     _inotifyFlags(inotifyFlags), _eventMasksToWatch(eventMasksToWatch),
     _dataPathToWatch(std::move(dataPathToWatch)),
     _excludeList(std::move(excludeList)), _includeList(std::move(includeList)),
     _inotifyFileDescriptor(inotifyInit()),
-    _fdioInstance(
-        std::make_unique<sdbusplus::async::fdio>(ctx, _inotifyFileDescriptor()))
+    _fdioInstance(std::make_unique<sdbusplus::async::fdio>(
+        ctx, _inotifyFileDescriptor())),
+    _stopEventsCallback(stopEventsCallback ? std::move(stopEventsCallback)
+                                           : [] { return false; })
 {
     createWatchers(_dataPathToWatch);
 }
@@ -468,6 +471,13 @@ std::optional<std::vector<EventInfo>> DataWatcher::readEvents()
 void DataWatcher::processEvents(
     const std::vector<EventInfo>& receivedEventsInfo)
 {
+    if (_stopEventsCallback())
+    {
+        lg2::warning("Events read but not processed for [{PATH}]", "PATH",
+                     _dataPathToWatch);
+        return;
+    }
+
     std::ranges::for_each(receivedEventsInfo, [this](const auto& event) {
         std::optional<DataOperation> dataOperation = processEvent(event);
         if (dataOperation.has_value())
