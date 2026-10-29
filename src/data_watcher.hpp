@@ -10,6 +10,7 @@
 #include <sdbusplus/async.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <unordered_set>
 #include <vector>
@@ -84,12 +85,16 @@ class DataWatcher
      *                           monitoring
      *  @param[in] includeList - The list of paths should be included while
      *                           monitoring
+     *  @param[in] stopEventsCallback - Callback invoked when events are read,
+     *                           returns true if the events must be read but not
+     *                           processed (e.g. sync is disabled).
      */
     DataWatcher(
         sdbusplus::async::context& ctx, int inotifyFlags,
         uint32_t eventMasksToWatch, fs::path dataPathToWatch,
         std::optional<std::unordered_set<fs::path>> excludeList = std::nullopt,
-        std::optional<std::unordered_set<fs::path>> includeList = std::nullopt);
+        std::optional<std::unordered_set<fs::path>> includeList = std::nullopt,
+        std::function<bool()> stopEventsCallback = nullptr);
     /**
      * @brief Destructor
      * Remove the inotify watch and close fd's
@@ -193,6 +198,12 @@ class DataWatcher
      * @brief fdio instance
      */
     std::unique_ptr<sdbusplus::async::fdio> _fdioInstance;
+
+    /**
+     * @brief Callback to check whether the received events must be skipped
+     *        from processing. Returns true to skip.
+     */
+    std::function<bool()> _stopEventsCallback;
 
     /**
      * @brief Map of DataOperation
