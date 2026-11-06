@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -100,6 +101,26 @@ std::optional<std::chrono::seconds>
  */
 std::optional<std::chrono::seconds>
     fileTimeToEpoch(const std::filesystem::file_time_type& fileTime);
+
+/**
+ * @brief Look up a key in an associative container.
+ *
+ * @tparam Map - Associative container type exposing key_type, mapped_type
+ *               and find() (e.g. std::map, std::unordered_map)
+ *
+ * @param[in] map - The container to search
+ * @param[in] key - The key to look up
+ *
+ * @return A copy of the mapped value if the key exists, std::nullopt
+ *         otherwise.
+ */
+template <typename Map>
+std::optional<typename Map::mapped_type>
+    findInMap(const Map& map, const typename Map::key_type& key)
+{
+    auto it = map.find(key);
+    return it != map.end() ? std::optional(it->second) : std::nullopt;
+}
 
 namespace rsync
 {

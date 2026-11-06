@@ -445,10 +445,10 @@ std::optional<std::vector<EventInfo>> DataWatcher::readEvents()
         // Using find() because,
         // IN_IGNORED events can arrive for already removed watch descriptors
         // Hence use of [] to access the map entries will cause stale entries.
-        auto wdIter = _watchDescriptors.find(receivedEvent->wd);
-        std::string pathStr = (wdIter != _watchDescriptors.end())
-                                  ? wdIter->second.string()
-                                  : "[removed path]";
+        auto watchPath = utility::findInMap(_watchDescriptors,
+                                            receivedEvent->wd);
+        std::string pathStr = watchPath.has_value() ? watchPath->string()
+                                                    : "[removed watcher]";
 
         lg2::debug("Received {EVENTS} from {PATH}, wd:{WD} and name : {NAME}",
                    "EVENTS", eventName(receivedEvent->mask), "PATH", pathStr,
@@ -501,9 +501,18 @@ std::optional<DataOperation>
         return std::nullopt;
     }
 
-    fs::path eventReceivedFor =
-        _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
-        std::get<BaseName>(receivedEventInfo);
+    auto watchPath = utility::findInMap(_watchDescriptors,
+                                        std::get<WD>(receivedEventInfo));
+    if (!watchPath.has_value())
+    {
+        lg2::debug("Skipping the {EVENTS} as the watch descriptor {WD} is not "
+                   "found",
+                   "EVENTS", eventName(std::get<2>(receivedEventInfo)), "WD",
+                   std::get<WD>(receivedEventInfo));
+        return std::nullopt;
+    }
+    fs::path eventReceivedFor = watchPath.value() /
+                                std::get<BaseName>(receivedEventInfo);
 
     // Skip the events received for the paths which are in excluded list and not
     // in include list.
@@ -565,8 +574,13 @@ std::optional<DataOperation>
 std::optional<DataOperation>
     DataWatcher::processCloseWrite(const EventInfo& receivedEventInfo)
 {
-    fs::path eventReceivedFor =
-        _watchDescriptors.at(std::get<WD>(receivedEventInfo));
+    auto watchPath = utility::findInMap(_watchDescriptors,
+                                        std::get<WD>(receivedEventInfo));
+    if (!watchPath.has_value())
+    {
+        return std::nullopt;
+    }
+    fs::path eventReceivedFor = watchPath.value();
     lg2::debug("Processing an IN_CLOSE_WRITE for {PATH}", "PATH",
                eventReceivedFor / std::get<BaseName>(receivedEventInfo));
 
@@ -619,9 +633,14 @@ std::optional<DataOperation>
     if ((std::get<2>(receivedEventInfo) & IN_ISDIR) != 0)
     {
         std::error_code ec;
-        fs::path absCreatedPath =
-            _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
-            std::get<BaseName>(receivedEventInfo) / "";
+        auto monitoringPath = utility::findInMap(
+            _watchDescriptors, std::get<WD>(receivedEventInfo));
+        if (!monitoringPath.has_value())
+        {
+            return std::nullopt;
+        }
+        fs::path absCreatedPath = monitoringPath.value() /
+                                  std::get<BaseName>(receivedEventInfo) / "";
 
         lg2::debug("Processing an IN_CREATE for {PATH}", "PATH",
                    absCreatedPath);
@@ -702,10 +721,8 @@ std::optional<DataOperation>
                 }
                 return false;
             };
-            auto monitoringPath =
-                _watchDescriptors.at(std::get<WD>(receivedEventInfo));
             std::ranges::for_each(
-                fs::recursive_directory_iterator(monitoringPath),
+                fs::recursive_directory_iterator(monitoringPath.value()),
                 modifyWatchIfExpected);
         }
 
@@ -731,9 +748,14 @@ std::optional<DataOperation>
     // directory
     // Case 2 : A file inside a watching directory is renamed.
 
-    fs::path absMovedPath =
-        _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
-        std::get<BaseName>(receivedEventInfo);
+    auto watchPath = utility::findInMap(_watchDescriptors,
+                                        std::get<WD>(receivedEventInfo));
+    if (!watchPath.has_value())
+    {
+        return std::nullopt;
+    }
+    fs::path absMovedPath = watchPath.value() /
+                            std::get<BaseName>(receivedEventInfo);
     lg2::debug("Received an IN_MOVED_FROM for {PATH} with  cookie : {COOKIE}",
                "PATH", absMovedPath, "COOKIE", std::get<3>(receivedEventInfo));
     if (absMovedPath.string().starts_with(_dataPathToWatch.string()))
@@ -759,9 +781,14 @@ std::optional<DataOperation>
 {
     // Case 1 : If a file inside a configured and watching directory is renamed.
     // Case 2 : A file is moved to a configured and watching directory.
-    fs::path absCopiedPath =
-        _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
-        std::get<BaseName>(receivedEventInfo);
+    auto watchPath = utility::findInMap(_watchDescriptors,
+                                        std::get<WD>(receivedEventInfo));
+    if (!watchPath.has_value())
+    {
+        return std::nullopt;
+    }
+    fs::path absCopiedPath = watchPath.value() /
+                             std::get<BaseName>(receivedEventInfo);
 
     if (absCopiedPath.string().starts_with(_dataPathToWatch.string()))
     {
@@ -782,7 +809,7 @@ std::optional<DataOperation>
             else
             {
                 lg2::debug("[{OLDPATH}] renamed/moved to [{NEWPATH}]",
-                           "OLDPATH", _movedFromDataOps.at(cookie).first,
+                           "OLDPATH", _movedFromDataOps[cookie].first,
                            "NEWPATH", absCopiedPath);
                 _movedFromDataOps.erase(cookie);
             }
@@ -798,8 +825,13 @@ std::optional<DataOperation>
     // Case 1 : A monitoring file got deleted.
     // case 2 : A monitoring directory got deleted.
 
-    fs::path deletedPath =
-        _watchDescriptors.at(std::get<WD>(receivedEventInfo));
+    auto watchPath = utility::findInMap(_watchDescriptors,
+                                        std::get<WD>(receivedEventInfo));
+    if (!watchPath.has_value())
+    {
+        return std::nullopt;
+    }
+    fs::path deletedPath = watchPath.value();
     lg2::debug("Processing IN_DELETE_SELF for {PATH}", "PATH", deletedPath);
 
     // Check if the configured path is same as or a child of the deleted path.
@@ -837,9 +869,14 @@ std::optional<DataOperation>
 std::optional<DataOperation>
     DataWatcher::processDelete(const EventInfo& receivedEventInfo)
 {
-    fs::path deletedPath =
-        _watchDescriptors.at(std::get<WD>(receivedEventInfo)) /
-        std::get<BaseName>(receivedEventInfo);
+    auto watchPath = utility::findInMap(_watchDescriptors,
+                                        std::get<WD>(receivedEventInfo));
+    if (!watchPath.has_value())
+    {
+        return std::nullopt;
+    }
+    fs::path deletedPath = watchPath.value() /
+                           std::get<BaseName>(receivedEventInfo);
 
     // Deleting sub directories will emit IN_DELETE_SELF as all the
     // subdirectories have unique watches. Hence skipping IN_DELETE for
@@ -886,13 +923,17 @@ void DataWatcher::removeIncludeParentWatches()
 
 void DataWatcher::removeWatch(int wd)
 {
-    fs::path pathToRemove = _watchDescriptors.at(wd);
+    auto pathToRemove = utility::findInMap(_watchDescriptors, wd);
+    if (!pathToRemove.has_value())
+    {
+        return;
+    }
 
     inotify_rm_watch(_inotifyFileDescriptor(), wd);
     _watchDescriptors.erase(wd);
 
-    lg2::debug("Stopped monitoring {PATH}, WD : {WD}", "PATH", pathToRemove,
-               "WD", wd);
+    lg2::debug("Stopped monitoring {PATH}, WD : {WD}", "PATH",
+               pathToRemove.value(), "WD", wd);
 }
 
 } // namespace data_sync::watch::inotify
