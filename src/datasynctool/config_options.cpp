@@ -5,6 +5,7 @@
 #include "config_options.hpp"
 
 #include "dbus_interactions.hpp"
+#include "utility.hpp"
 #include "utils.hpp"
 
 #include <nlohmann/json.hpp>
@@ -407,9 +408,10 @@ static void printWatchingStatus(const json& watchingPaths,
 // Helper: Print all actively watched paths grouped by Files and Directories
 static void printWatchingPaths(const json& watchingData, bool jsonOutput)
 {
-    const auto& watchingPaths = watchingData.at("watching_paths");
+    const auto watchingPaths = data_sync::utility::findInMap(
+        watchingData.get_ref<const json::object_t&>(), "watching_paths");
 
-    if (watchingPaths.is_null() || watchingPaths.empty())
+    if (!watchingPaths || watchingPaths->is_null() || watchingPaths->empty())
     {
         std::println("No paths are currently being watched");
         return;
@@ -420,7 +422,7 @@ static void printWatchingPaths(const json& watchingData, bool jsonOutput)
         {"Directories", json::array()},
     };
 
-    std::ranges::for_each(watchingPaths.items(), [&](const auto& item) {
+    std::ranges::for_each(watchingPaths->items(), [&](const auto& item) {
         const auto& [configPath, watchingList] = item;
 
         if (!configPath.empty() && configPath.back() == '/')
